@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Dados
+data/
+*.zip
