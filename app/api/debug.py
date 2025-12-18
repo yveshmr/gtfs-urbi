@@ -57,3 +57,30 @@ def get_all_vehicles():
     }
 
 
+from app.core.state import rt
+
+
+@router.get("/vehicles/enriched")
+def vehicles_enriched():
+    from app.services.vehicles import update_vehicles
+
+    # atualizar antes
+    update_vehicles()
+
+    enriched = []
+
+    for vid, v in rt.vehicles.items():
+        route = rt.routes.get(v["route_id"], {})
+
+        enriched.append({
+            "vehicle_label": v["vehicle_label"],
+            "lat": v["lat"],
+            "lon": v["lon"],
+            "speed_kmh": v["speed_kmh"],
+            "route_id": v["route_id"],
+            "route_short_name": route.get("route_short_name"),
+            "route_long_name": route.get("route_long_name"),
+            "event_ts": v["event_ts"],
+        })
+
+    return enriched
