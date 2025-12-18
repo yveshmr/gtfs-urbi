@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+httpx
+pandas
+protobuf
+gtfs-realtime-bindings
+geopy
+shapely
