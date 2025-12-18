@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from app.core.state import rt
 from app.services.gtfs_rt import fetch_vehicle_positions
+from app.services.vehicles import update_vehicles
 
 router = APIRouter()
 
@@ -24,12 +25,21 @@ def count_stop_times():
 def count_segments():
     return {"segments": len(rt.segments)}
 
-@router.get("/debug/segments/sample")
-def sample_segment():
-    for seg in rt.segments.values():
-        return seg
+@router.get("/debug/vehicles/sample")
+def sample_vehicle():
+    if not rt.vehicles:
+        return {"error": "no vehicles loaded"}
+
+    first_key = next(iter(rt.vehicles))
+    return rt.vehicles[first_key]
+
 
 @router.get("/debug/vehicles/count")
 def count_vehicles():
     feed = fetch_vehicle_positions()
     return {"vehicles": len(feed.entity)}
+
+@router.get("/debug/vehicles/count")
+def count_vehicles():
+    return {"vehicles": len(rt.vehicles)}
+
