@@ -1,24 +1,24 @@
-from app.core.state import rt
-from app.services.gtfs_rt import fetch_vehicle_positions
-
-
-def update_vehicles():
-    import requests
+import requests
 from google.transit import gtfs_realtime_pb2
-from app.core.state import rt
-from app.config import URL_VEHICLE_POSITIONS
 from datetime import datetime, timezone
 
-def update_vehicles():
+from app.core.state import rt
+from app.config import URL_VEHICLE_POSITIONS
 
+
+def update_vehicles():
+    # baixa feed protobuf
     raw = requests.get(URL_VEHICLE_POSITIONS).content
 
+    # interpreta protobuf
     feed = gtfs_realtime_pb2.FeedMessage()
     feed.ParseFromString(raw)
 
     vehicles = {}
 
+    # percorre entidades
     for ent in feed.entity:
+
         if not ent.HasField("vehicle"):
             continue
 
@@ -39,8 +39,8 @@ def update_vehicles():
             "event_ts": datetime.fromtimestamp(v.timestamp, tz=timezone.utc).isoformat()
         }
 
+    # atualiza estado global estático
     rt.vehicles.clear()
     rt.vehicles.update(vehicles)
 
     print(">>> vehicles parsed:", len(rt.vehicles))
-
