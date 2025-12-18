@@ -11,7 +11,6 @@ def load_trips() -> dict:
     }
     """
 
-    # Abre o arquivo GTFS estático
     zf = download_gtfs_zip()
     df = read_csv(zf, "trips.txt")
 
@@ -21,14 +20,20 @@ def load_trips() -> dict:
 
         trip_id = row["trip_id"]
 
+        # convert direction_id to int or None
+        raw_direction = row.get("direction_id")
+        if raw_direction not in (None, "", "nan"):
+            try:
+                direction_id = int(raw_direction)
+            except:
+                direction_id = None
+        else:
+            direction_id = None
+
         trips[trip_id] = {
             "route_id": row["route_id"],
             "shape_id": row.get("shape_id"),
-            "direction_id": (
-                int(row["direction_id"])
-                if not pd.isna(row.get("direction_id"))
-                else None
-            ),
+            "direction_id": direction_id,
             "trip_headsign": row.get("trip_headsign"),
         }
 
