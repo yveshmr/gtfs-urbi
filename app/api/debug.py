@@ -43,3 +43,17 @@ def count_vehicles():
 def count_vehicles():
     return {"vehicles": len(rt.vehicles)}
 
+@router.get("/debug/vehicles/all")
+def get_all_vehicles():
+    from app.services.vehicles import update_vehicles
+
+    # atualiza antes de responder
+    update_vehicles()
+
+    # retorna lista
+    return {
+        "count": len(rt.vehicles),
+        "vehicles": list(rt.vehicles.values()),
+    }
+
+
