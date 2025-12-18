@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from app.core.state import rt
-from app.services.gtfs_rt import fetch_vehicle_positions
 from app.services.vehicles import update_vehicles
 
 router = APIRouter()
@@ -25,46 +24,32 @@ def count_stop_times():
 def count_segments():
     return {"segments": len(rt.segments)}
 
+@router.get("/debug/vehicles/count")
+def count_vehicles():
+    update_vehicles()
+    return {"vehicles": len(rt.vehicles)}
+
 @router.get("/debug/vehicles/sample")
 def sample_vehicle():
+    update_vehicles()
+
     if not rt.vehicles:
         return {"error": "no vehicles loaded"}
 
     first_key = next(iter(rt.vehicles))
     return rt.vehicles[first_key]
 
-
-@router.get("/debug/vehicles/count")
-def count_vehicles():
-    feed = fetch_vehicle_positions()
-    return {"vehicles": len(feed.entity)}
-
-@router.get("/debug/vehicles/count")
-def count_vehicles():
-    return {"vehicles": len(rt.vehicles)}
-
 @router.get("/debug/vehicles/all")
 def get_all_vehicles():
-    from app.services.vehicles import update_vehicles
-
-    # atualiza antes de responder
     update_vehicles()
 
-    # retorna lista
     return {
         "count": len(rt.vehicles),
         "vehicles": list(rt.vehicles.values()),
     }
 
-
-from app.core.state import rt
-
-
 @router.get("/vehicles/enriched")
 def vehicles_enriched():
-    from app.services.vehicles import update_vehicles
-
-    # atualizar antes
     update_vehicles()
 
     enriched = []
