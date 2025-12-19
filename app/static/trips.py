@@ -6,8 +6,7 @@ def load_trips() -> dict:
     trip_id -> {
         route_id,
         shape_id,
-        direction_id,
-        trip_headsign
+        direction_id
     }
     """
 
@@ -18,23 +17,27 @@ def load_trips() -> dict:
 
     for _, row in df.iterrows():
 
-        trip_id = row["trip_id"]
+        trip_id = str(row["trip_id"]).strip()
+        route_id = str(row["route_id"]).strip()
 
-        # convert direction_id to int or None
-        raw_direction = row.get("direction_id")
-        if raw_direction not in (None, "", "nan"):
-            try:
-                direction_id = int(raw_direction)
-            except:
-                direction_id = None
+        # direction_id pode ser float, converter para int ou None
+        direction = row.get("direction_id")
+        if direction == "" or direction is None:
+            direction = None
         else:
-            direction_id = None
+            direction = int(direction)
+
+        # shape pode ser string ou vazio
+        shape = row.get("shape_id")
+        if shape == "" or shape is None:
+            shape = None
+        else:
+            shape = str(shape).strip()
 
         trips[trip_id] = {
-            "route_id": row["route_id"],
-            "shape_id": row.get("shape_id"),
-            "direction_id": direction_id,
-            "trip_headsign": row.get("trip_headsign"),
+            "route_id": route_id,
+            "direction_id": direction,
+            "shape_id": shape,
         }
 
     return trips
