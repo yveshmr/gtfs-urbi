@@ -1,71 +1,160 @@
 from fastapi import APIRouter
+import random
+
 from app.core.state import rt
 from app.services.vehicles import update_vehicles
+from app.services.vehicle_progress import compute_vehicle_progress
+from app.services.trip_lookup import get_trips_for_route
+from app.services.stop_times_lookup import get_stop_times_for_trip
 
-router = APIRouter()
 
-@router.get("/debug/stops/count")
-def count_stops():
-    return {"stops": len(rt.stops)}
+router = APIRouter(prefix="/debug", tags=["debug"])
 
-@router.get("/debug/routes/count")
-def count_routes():
-    return {"routes": len(rt.routes)}
 
-@router.get("/debug/trips/count")
-def count_trips():
-    return {"trips": len(rt.trips)}
+@router.get("/state")
+def state_summary():
+    return {
+        "stops": len(rt.stops or {}),
+        "routes": len(rt.routes or {}),
+        "trips": len(rt.trips or {}),
+        "stop_times": len(rt.stop_times or {}),
+        "shapes": len(rt.shapes or {}),
+        "vehicles": len(rt.vehicles or {}),
+        "route_shapes": len(rt.route_shapes or {}),
+    }
 
-@router.get("/debug/stop_times/count")
-def count_stop_times():
-    return {"trips_with_stop_times": len(rt.stop_times)}
 
-@router.get("/debug/segments/count")
-def count_segments():
-    return {"segments": len(rt.segments)}
+# ---------------- VEHICLES ---------------- #
 
-@router.get("/debug/vehicles/count")
-def count_vehicles():
-    update_vehicles()
-    return {"vehicles": len(rt.vehicles)}
-
-@router.get("/debug/vehicles/sample")
+@router.get("/sample/vehicle")
 def sample_vehicle():
     update_vehicles()
 
     if not rt.vehicles:
-        return {"error": "no vehicles loaded"}
+        return {"vehicles": 0}
 
-    first_key = next(iter(rt.vehicles))
-    return rt.vehicles[first_key]
+    vid = random.choice(list(rt.vehicles.keys()))
+    return rt.vehicles[vid]
 
-@router.get("/debug/vehicles/all")
-def get_all_vehicles():
+
+@router.get("/vehicles")
+def list_all_vehicles():
     update_vehicles()
+    return list(rt.vehicles.values())
+
+
+@router.get("/vehicle/{vehicle_id}")
+def get_vehicle(vehicle_id: str):
+    update_vehicles()
+    return rt.vehicles.get(vehicle_id)
+
+
+@router.get("/vehicle_progress/{vehicle_id}")
+def debug_vehicle_progress(vehicle_id: str):
+    update_vehicles()
+
+    v = rt.vehicles.get(vehicle_id)
+
+    if not v:
+        return {"ok": False, "reason": "vehicle not found", "vehicle_id": vehicle_id}
 
     return {
-        "count": len(rt.vehicles),
-        "vehicles": list(rt.vehicles.values()),
+        "ok": True,
+        "vehicle_id": vehicle_id,
+        "progress": compute_vehicle_progress(v)
     }
 
-@router.get("/vehicles/enriched")
-def vehicles_enriched():
-    update_vehicles()
 
-    enriched = []
+# ---------------- SHAPES ---------------- #
 
-    for vid, v in rt.vehicles.items():
-        route = rt.routes.get(v["route_id"], {})
+@router.get("/shapes/sample")
+def shapes_sample():
+    if not rt.shapes:
+        return {"ok": False, "reason": "no shapes loaded"}
 
-        enriched.append({
-            "vehicle_label": v["vehicle_label"],
-            "lat": v["lat"],
-            "lon": v["lon"],
-            "speed_kmh": v["speed_kmh"],
-            "route_id": v["route_id"],
-            "route_short_name": route.get("route_short_name"),
-            "route_long_name": route.get("route_long_name"),
-            "event_ts": v["event_ts"],
-        })
+    sid = random.choice(list(rt.shapes.keys()))
+    pts = rt.shapes[sid]
 
-    return enriched
+    return {
+        "ok": True,
+        "shape_id": sid,
+        "point_count": len(pts),
+        "first_points": pts[:3],
+    }
+
+
+# ---------------- STOP TIMES ---------------- #
+
+@router.get("/trip/stop_times/{trip_id}")
+def debug_trip_stop_times(trip_id: str):
+    stops = get_stop_times_for_trip(trip_id)
+
+    if not stops:
+        return {
+            "trip_id": trip_id,
+            "exists": False,
+            "len": 0,
+            "sample": None,
+        }
+
+    return {
+        "trip_id": trip_id,
+        "exists": True,
+        "len": len(stops),
+        "sample": stops[:5],
+    }
+
+
+# ---------------- ROUTE → SHAPES ---------------- #
+
+@router.get("/route/{route_id}/shapes/{direction_id}")
+def debug_route_shapes(route_id: str, direction_id: int):
+    trips = get_trips_for_route(route_id, direction_id)
+
+    if not trips:
+        return {
+            "ok": False,
+            "reason": "no trips",
+            "route_id": route_id,
+            "direction_id": direction_id,
+        }
+
+    shapes = {t["trip_id"]: t["shape_id"] for t in trips if t.get("shape_id")}
+
+    return {
+        "ok": True,
+        "route_id": route_id,
+        "direction_id": direction_id,
+        "trip_count": len(trips),
+        "unique_shapes": sorted(list(set(shapes.values()))),
+        "sample": list(shapes.items())[:5],
+    }
+
+
+# ---------------- ROUTE_SHAPES INDEX ---------------- #
+
+@router.get("/route_shapes")
+def debug_route_shapes_index():
+    if not rt.route_shapes:
+        return {"ok": False, "count": 0}
+
+    return {
+        "ok": True,
+        "count": len(rt.route_shapes),
+    }
+
+
+@router.get("/route_shapes/sample")
+def debug_route_shapes_sample():
+    if not rt.route_shapes:
+        return {"ok": False, "count": 0, "sample": None}
+
+    keys = list(rt.route_shapes.keys())
+    k = random.choice(keys)
+
+    return {
+        "ok": True,
+        "count": len(keys),
+        "sample_key": k,
+        "sample_shape": rt.route_shapes[k],
+    }

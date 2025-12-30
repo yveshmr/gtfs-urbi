@@ -1,17 +1,25 @@
-from zoneinfo import ZoneInfo
-import os
+from pathlib import Path
 
-LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
+#
+# Diretórios base
+#
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-URL_GTFS_STATIC_ZIP = os.getenv(
-    "URL_GTFS_STATIC_ZIP",
-    "https://servicos.cittati.com.br/GTFS_PLATAFORMA/URBI/GTFS_URBI.zip",
+DATA_DIR = BASE_DIR / "data"
+GTFS_DIR = DATA_DIR / "gtfs"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+GTFS_DIR.mkdir(parents=True, exist_ok=True)
+
+#
+# URLs GTFS
+#
+GTFS_STATIC_URL = "https://servicos.cittati.com.br/GTFS_PLATAFORMA/URBI/GTFS_URBI.zip"
+
+GTFS_RT_VEHICLE_POSITIONS_URL = (
+    "https://servicos.cittati.com.br/GTFS-RT2/URBI/vehicle-positions"
 )
 
-URL_VEHICLE_POSITIONS = os.getenv(
-    "URL_VEHICLE_POSITIONS",
-    "https://servicos.cittati.com.br/GTFS-RT2/URBI/vehicle-positions",
-)
-
-POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "15"))
-STATIC_REFRESH_MIN = int(os.getenv("STATIC_REFRESH_MIN", "60"))
+# Para compatibilidade com loaders
+URL_VEHICLE_POSITIONS = GTFS_RT_VEHICLE_POSITIONS_URL
+URL_GTFS_STATIC_ZIP = GTFS_STATIC_URL
