@@ -9,41 +9,34 @@ logger = logging.getLogger(__name__)
 """
 Realtime Subtrechos
 
-Responsabilidade deste módulo:
-
-✔ fornecer lookup eficiente:
-    (shape_id, shape_pos_m) → Subtrecho
-
-❗ Nesta primeira fase:
-- NÃO altera estado global
-- NÃO calcula tempos
-- NÃO impacta backend existente
+✔ (shape_id, shape_pos_m) → Subtrecho
 """
 
-# shape_id -> lista ordenada de subtrechos
+# shape_id -> lista ordenada por m1
 subtrechos_by_shape: Dict[str, List[Subtrecho]] = {}
 
 
 def build_subtrecho_index():
     """
-    Constrói índice em memória agrupando subtrechos por shape.
-
-    Observação:
-    O pipeline original não salva shape_id em cada Subtrecho,
-    então nesta fase manteremos apenas o agrupamento base.
+    Constrói índice de subtrechos agrupado por shape_id.
     """
-    global subtrechos_by_shape
 
+    global subtrechos_by_shape
     subtrechos_by_shape.clear()
 
     for s in rt.subtrechos:
-        # Por enquanto agrupamos apenas por group
-        # pois shape_id ainda não está disponível no objeto
-        subtrechos_by_shape.setdefault(s.group, []).append(s)
+        if not s.shape_id:
+            continue
+
+        subtrechos_by_shape.setdefault(s.shape_id, []).append(s)
+
+    # ordenar
+    for sid, lst in subtrechos_by_shape.items():
+        lst.sort(key=lambda x: x.m1)
 
     logger.info(
-        f"Índice inicial de subtrechos criado "
-        f"({len(subtrechos_by_shape)} grupos)"
+        f"Índice de subtrechos criado: "
+        f"{len(subtrechos_by_shape)} shapes indexados"
     )
 
 
@@ -51,10 +44,13 @@ def find_subtrecho_for_position(
     shape_id: str,
     shape_pos_m: float
 ) -> Optional[Subtrecho]:
-    """
-    Localiza o subtrecho correspondente à posição do veículo.
 
-    Nesta versão inicial, ainda não temos shape_pos acumulado
-    nos objetos, então retornamos None.
-    """
+    lst = subtrechos_by_shape.get(shape_id)
+    if not lst:
+        return None
+
+    for s in lst:
+        if s.m1 <= shape_pos_m < s.m2:
+            return s
+
     return None

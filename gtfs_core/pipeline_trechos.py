@@ -13,7 +13,7 @@ Pipeline GTFS → SUBTRECHOS
 import io
 import zipfile
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Tuple
 
 import pandas as pd
 from geopy.distance import geodesic
@@ -31,6 +31,9 @@ class Subtrecho:
     group: str
     source: str
     polyline: List[Tuple[float, float]]
+    m1: float = 0.0
+    m2: float = 0.0
+    shape_id: str = ""
 
 
 def load_stops(zf):
@@ -98,6 +101,7 @@ def measure_along_shape(shape, lat, lon):
     best = None
     best_i = 0
     for i, (la, lo) in enumerate(zip(shape["lats"], shape["lons"])):
+
         d = geodesic((la, lo), (lat, lon)).meters
         if best is None or d < best:
             best = d
@@ -147,6 +151,7 @@ def construir_todos_os_subtrechos() -> List[Subtrecho]:
             best_shape = None
             best_dist = None
             best_seq = None
+            best_sid = None
 
             for sid in candidate_shapes:
 
@@ -178,6 +183,7 @@ def construir_todos_os_subtrechos() -> List[Subtrecho]:
                     best_shape = shapes[sid]
                     best_dist = dist
                     best_seq = seq
+                    best_sid = sid
 
             if not best_shape:
                 continue
@@ -208,7 +214,10 @@ def construir_todos_os_subtrechos() -> List[Subtrecho]:
                         distance_m=mb - ma,
                         group=f"{s1}->{s2}",
                         source="shape",
-                        polyline=[]
+                        polyline=[],
+                        m1=ma,
+                        m2=mb,
+                        shape_id=best_sid,
                     )
                 )
 

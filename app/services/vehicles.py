@@ -5,20 +5,35 @@ from app.core.state import rt
 from app.core.config import URL_VEHICLE_POSITIONS
 from app.geometry.shape_positioning import project_vehicle_shape_position
 from app.services.vehicle_progress import compute_shape_length
+from app.services.realtime_subtrechos import find_subtrecho_for_position
 
 from google.transit import gtfs_realtime_pb2
+
+
+AVG_WINDOW_SEC = 900  # 10 min
 
 
 def parse_speed(speed_raw):
     try:
         if speed_raw is None:
             return None
-
         return round(speed_raw, 1)
-
     except:
         return None
 
+
+def prune_old_measurements(now_ts: int):
+    """
+    Mantém apenas medições ainda dentro da janela móvel
+    """
+    cutoff = now_ts - AVG_WINDOW_SEC
+
+    for key, lst in list(rt.subtrecho_times.items()):
+        new_lst = [m for m in lst if m["end_ts"] >= cutoff]
+        if new_lst:
+            rt.subtrecho_times[key] = new_lst
+        else:
+            rt.subtrecho_times.pop(key, None)
 
 
 def update_vehicles():
@@ -37,13 +52,26 @@ def update_vehicles():
     vehicles = {}
     now = int(time.time())
 
+    if not hasattr(rt, "vehicle_subtrecho_state"):
+        rt.vehicle_subtrecho_state = {}
+
+    if not hasattr(rt, "subtrecho_times"):
+        rt.subtrecho_times = {}
+
+    if not hasattr(rt, "subtrecho_stats"):
+        rt.subtrecho_stats = {}
+
+    #
+    # LIMPA MEDIÇÕES ANTIGAS
+    #
+    prune_old_measurements(now)
+
     for entity in feed.entity:
 
         if not entity.HasField("vehicle"):
             continue
 
         veh = entity.vehicle
-
         desc = veh.vehicle
         pos = veh.position
         trip = veh.trip
@@ -69,17 +97,8 @@ def update_vehicles():
             "current_stop_sequence": veh.current_stop_sequence if veh.HasField("current_stop_sequence") else None,
         }
 
-        #
-        # STATUS
-        #
-        if route_id:
-            v["status"] = "on_route"
-        else:
-            v["status"] = "off_route"
+        v["status"] = "on_route" if route_id else "off_route"
 
-        #
-        # SHAPE PROJECTION
-        #
         v["shape_id"] = None
         v["shape_pos_m"] = None
         v["shape_len_m"] = None
@@ -93,6 +112,7 @@ def update_vehicles():
             shape_id = rt.route_shapes.get(key)
 
             if shape_id and shape_id in rt.shapes:
+
                 pts = rt.shapes[shape_id]
                 v["shape_id"] = shape_id
 
@@ -107,46 +127,95 @@ def update_vehicles():
                     v["progress"] = v["shape_pos_m"] / v["shape_len_m"]
 
                 #
-                # --- SPEED AVERAGE ---
+                # SUBTRECHOS
                 #
-                now_ts = now
-                key_hist = v["vehicle_id"]
+                try:
+                    current = rt.vehicle_subtrecho_state.get(vehicle_id)
+                    detected = None
 
-                if v["status"] == "on_route" and v["shape_pos_m"] is not None:
+                    if v["shape_id"] and v["shape_pos_m"] is not None:
+                        detected = find_subtrecho_for_position(
+                            v["shape_id"],
+                            v["shape_pos_m"]
+                        )
 
-                    hist = rt.vehicle_history.get(key_hist)
+                    #
+                    # entrou
+                    #
+                    if detected and (not current or current.get("subtrecho") != detected):
 
-                    if not hist or hist.get("shape_id") != v["shape_id"]:
-                        rt.vehicle_history[key_hist] = {
-                            "shape_id": v["shape_id"],
-                            "first_ts": now_ts,
-                            "first_pos": v["shape_pos_m"],
+                        rt.vehicle_subtrecho_state[vehicle_id] = {
+                            "subtrecho": detected,
+                            "entered_at": now
                         }
 
-                    else:
-                        dist = max(0.0, v["shape_pos_m"] - hist["first_pos"])
-                        dt = max(1, now_ts - hist["first_ts"])
-                        v["speed_avg_kmh"] = round((dist / dt) * 3.6, 1)
+                        print(
+                            f"🚍 veículo {vehicle_id} entrou em "
+                            f"{detected.s1}->{detected.s2} "
+                            f"(shape {detected.shape_id})"
+                        )
 
-                #
-                # --- ETA ---
-                #
-                if (
-                    v["progress"] is not None
-                    and v["speed_avg_kmh"]
-                    and v["speed_avg_kmh"] > 3
-                ):
-                    dist_remaining = max(
-                        0.0, v["shape_len_m"] - v["shape_pos_m"]
-                    )
+                    #
+                    # saiu
+                    #
+                    if current and not detected:
 
-                    eta_sec = int(dist_remaining / (v["speed_avg_kmh"] / 3.6))
+                        st = current["subtrecho"]
+                        start_ts = current["entered_at"]
+                        end_ts = now
+                        duration = max(1, end_ts - start_ts)
 
-                    v["eta"] = {
-                        "eta_ts": now_ts + eta_sec,
-                        "eta_seconds": eta_sec,
-                        "dist_remaining_m": round(dist_remaining),
-                    }
+                        #
+                        # --- OUTLIERS ---
+                        #
+                        if duration < 5:
+                            continue
+
+                        if duration > 1800:
+                            continue
+
+                        key_triplet = (st.shape_id, st.s1, st.s2)
+
+                        rt.subtrecho_times.setdefault(key_triplet, []).append({
+                            "vehicle_id": vehicle_id,
+                            "start_ts": start_ts,
+                            "end_ts": end_ts,
+                            "duration_s": duration,
+                        })
+
+                        print(
+                            f"🏁 veículo {vehicle_id} saiu de "
+                            f"{st.s1}->{st.s2} "
+                            f"(shape {st.shape_id}) "
+                            f"({duration}s)"
+                        )
+
+                        #
+                        # AGGREGAÇÃO — SÓ SE HOUVER MEDIÇÕES RECENTES
+                        #
+                        cutoff = now - AVG_WINDOW_SEC
+
+                        recent = [
+                            m for m in rt.subtrecho_times[key_triplet]
+                            if m["end_ts"] >= cutoff
+                        ]
+
+                        if recent:
+                            avg = sum(m["duration_s"] for m in recent) / len(recent)
+
+                            rt.subtrecho_stats[key_triplet] = {
+                                "window_start": min(m["end_ts"] for m in recent),
+                                "window_end": max(m["end_ts"] for m in recent),
+                                "n": len(recent),
+                                "avg_s": round(avg, 1),
+                            }
+                        else:
+                            rt.subtrecho_stats.pop(key_triplet, None)
+
+                        rt.vehicle_subtrecho_state.pop(vehicle_id, None)
+
+                except Exception as e:
+                    print(f"⚠️ erro realtime subtrecho: {e}")
 
         vehicles[vehicle_id] = v
 

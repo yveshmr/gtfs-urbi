@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import asyncio
+import time
 
 from app.core.state import rt
 from app.services.gtfs_static import ensure_gtfs_static
@@ -9,12 +12,12 @@ from app.services.trip_lookup import load_trips, build_route_shape_index
 from app.services.stops_loader import load_stops
 from app.services.routes_loader import load_routes
 from app.services.vehicles import update_vehicles
-
 from app.api.debug import router as debug_router
+from app.services.subtrecho_persistence import persist_subtrechos_loop
 
 # <<< NOVOS IMPORTS >>>
 from gtfs_core.pipeline_trechos import construir_todos_os_subtrechos
-from gtfs_core.pairs import PAIRS
+from app.services.realtime_subtrechos import build_subtrecho_index
 
 
 app = FastAPI(
@@ -91,10 +94,15 @@ def startup():
         rt.subtrechos = construir_todos_os_subtrechos()
         print(f"✔ subtrechos gerados: {len(rt.subtrechos)}")
 
+        #
+        # índice realtime
+        #
+        build_subtrecho_index()
+        print("✔ índice de subtrechos para realtime criado")
+
     except Exception as e:
         print(f"⚠️ Falha ao gerar subtrechos: {e}")
         rt.subtrechos = []
-
 
     #
     # 8 — puxar vehicles GTFS-RT
@@ -112,6 +120,11 @@ def startup():
 
     print("INFO:     Application startup complete.")
 
+    #
+    # LOOP DE SNAPSHOT 10min
+    #
+    asyncio.create_task(persist_subtrechos_loop())
+
 
 #
 # DEBUG ROUTES
@@ -122,3 +135,48 @@ app.include_router(debug_router)
 @app.get("/")
 def root():
     return {"status": "ok", "service": "gtfs-live-backend"}
+
+
+
+# ==========================================================
+# 🚑 HEALTH — compatível com o monolítico
+# ==========================================================
+
+AVG_WINDOW_SEC = 900   # 10 minutos
+
+
+@app.get("/health", response_class=JSONResponse)
+def health():
+
+    now = int(time.time())
+    cutoff = now - AVG_WINDOW_SEC
+
+    total_keys = len(getattr(rt, "subtrecho_times", {}))
+
+    segments_recent = 0
+    measurements_recent = 0
+
+    if hasattr(rt, "subtrecho_times"):
+
+        for lst in rt.subtrecho_times.values():
+            recent = [m for m in lst if m["end_ts"] >= cutoff]
+
+            if recent:
+                segments_recent += 1
+                measurements_recent += len(recent)
+
+    avg_samples = (
+        measurements_recent / segments_recent
+        if segments_recent > 0 else 0
+    )
+
+    return {
+        "status": "ok",
+        "vehicles_total": len(rt.vehicles),
+        "subtrechos": {
+            "total_keys": total_keys,
+            "segments_with_data_last_10m": segments_recent,
+            "measurements_last_10m": measurements_recent,
+            "avg_samples_per_segment": round(avg_samples, 2),
+        }
+    }

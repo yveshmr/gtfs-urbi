@@ -159,11 +159,8 @@ def debug_route_shapes_sample():
         "sample_shape": rt.route_shapes[k],
     }
 
-from app.core.state import rt
-from fastapi import APIRouter
 
-router = APIRouter(prefix="/debug", tags=["debug"])
-
+# ---------------- SUBTRECHOS LIST ---------------- #
 
 @router.get("/subtrechos")
 def debug_subtrechos(limit: int = 100):
@@ -180,6 +177,8 @@ def debug_subtrechos(limit: int = 100):
             "to": st.s2,
             "group": st.group,
             "distance_m": round(st.distance_m, 1),
+            "m1": round(st.m1, 1),
+            "m2": round(st.m2, 1),
         })
 
     return {
@@ -187,3 +186,43 @@ def debug_subtrechos(limit: int = 100):
         "showing": len(data),
         "items": data,
     }
+
+
+# ---------------- SUBTRECHOS TIMES ---------------- #
+
+@router.get("/subtrechos/times")
+def debug_subtrechos_times():
+    """
+    Medições brutas por subtrecho.
+    """
+
+    out = {}
+
+    if not hasattr(rt, "subtrecho_times"):
+        return out
+
+    for key, values in rt.subtrecho_times.items():
+        k = f"{key[0]}->{key[1]}"
+        out[k] = values
+
+    return out
+
+
+# ---------------- SUBTRECHOS STATS ---------------- #
+
+@router.get("/subtrechos/stats")
+def debug_subtrechos_stats():
+    """
+    Agregação — média móvel 15 minutos.
+    """
+
+    out = {}
+
+    if not hasattr(rt, "subtrecho_stats"):
+        return out
+
+    for key, stats in rt.subtrecho_stats.items():
+        k = f"{key[0]}->{key[1]}"
+        out[k] = stats
+
+    return out
