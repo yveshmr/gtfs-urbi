@@ -158,3 +158,32 @@ def debug_route_shapes_sample():
         "sample_key": k,
         "sample_shape": rt.route_shapes[k],
     }
+
+from app.core.state import rt
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/debug", tags=["debug"])
+
+
+@router.get("/subtrechos")
+def debug_subtrechos(limit: int = 100):
+    """
+    Lista os subtrechos carregados em memória.
+    limit = número máximo de itens retornados
+    """
+
+    data = []
+
+    for st in list(rt.subtrechos)[:limit]:
+        data.append({
+            "from": st.s1,
+            "to": st.s2,
+            "group": st.group,
+            "distance_m": round(st.distance_m, 1),
+        })
+
+    return {
+        "total": len(rt.subtrechos),
+        "showing": len(data),
+        "items": data,
+    }

@@ -1,4 +1,6 @@
 from dataclasses import dataclass, field
+from typing import Dict, Tuple, List
+from gtfs_core.pipeline_trechos import Subtrecho
 import asyncio
 
 
@@ -13,6 +15,9 @@ class RuntimeState:
     route_shapes: dict = field(default_factory=dict)
 
     vehicle_history: dict = field(default_factory=dict)
+
+    # 👇 NOVO — lista de subtrechos calculados pelo pipeline
+    subtrechos: List[Subtrecho] = field(default_factory=list)
 
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 

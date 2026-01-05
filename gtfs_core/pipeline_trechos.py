@@ -1,18 +1,26 @@
 # -*- coding: utf-8 -*-
 
 """
-Pipeline de criação de SUBTRECHOS baseado no código monolítico.
+Pipeline GTFS → SUBTRECHOS
+(Mesma lógica do monolítico — otimizada por SHAPE)
+
+✔ baixa GTFS ZIP diretamente da URL oficial
+✔ processa TUDO em memória
+✔ percorre apenas shapes que passam pelos dois stops
+✔ cria subtrechos entre stops intermediários
 """
 
 import io
 import zipfile
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import pandas as pd
 from geopy.distance import geodesic
 
-from .pairs import PAIRS
+from app.core.config import GTFS_STATIC_URL
+from gtfs_core.pairs import PAIRS
+import requests
 
 
 @dataclass
@@ -25,113 +33,141 @@ class Subtrecho:
     polyline: List[Tuple[float, float]]
 
 
-def load_stops(zf: zipfile.ZipFile):
-    df = pd.read_csv(io.BytesIO(zf.read("stops.txt")), dtype=str)
-    out = {}
-    for _, r in df.iterrows():
-        sid = r["stop_id"].strip()
-        lat = float(str(r["stop_lat"]).replace(",", "."))
-        lon = float(str(r["stop_lon"]).replace(",", "."))
-        out[sid] = (lat, lon)
-    return out
+def load_stops(zf):
+    df = pd.read_csv(zf.open("stops.txt"), dtype=str)
+    return {
+        r["stop_id"]: (float(r["stop_lat"]), float(r["stop_lon"]))
+        for _, r in df.iterrows()
+    }
 
 
-def load_stop_times(zf: zipfile.ZipFile):
-    df = pd.read_csv(io.BytesIO(zf.read("stop_times.txt")), dtype=str)
+def load_stop_times(zf):
+    df = pd.read_csv(zf.open("stop_times.txt"), dtype=str)
+
     trips = {}
     for _, r in df.iterrows():
         tid = r["trip_id"]
         sid = r["stop_id"]
         seq = int(r["stop_sequence"])
-        trips.setdefault(tid, []).append((sid, seq))
-    for tid in trips:
-        trips[tid].sort(key=lambda x: x[1])
-    return trips
+        trips.setdefault(tid, []).append((seq, sid))
 
-
-def load_trips(zf: zipfile.ZipFile):
-    df = pd.read_csv(io.BytesIO(zf.read("trips.txt")), dtype=str)
     out = {}
-    for _, r in df.iterrows():
-        out[r["trip_id"]] = r.get("shape_id")
+    for tid, rows in trips.items():
+        rows.sort(key=lambda x: x[0])
+        out[tid] = [sid for _, sid in rows]
+
     return out
 
 
-def load_shapes(zf: zipfile.ZipFile):
-    if "shapes.txt" not in zf.namelist():
-        return {}
+def load_trips(zf):
+    df = pd.read_csv(zf.open("trips.txt"), dtype=str)
+    return {r["trip_id"]: r.get("shape_id") for _, r in df.iterrows()}
 
-    df = pd.read_csv(io.BytesIO(zf.read("shapes.txt")), dtype=str)
+
+def load_shapes(zf):
+    df = pd.read_csv(zf.open("shapes.txt"), dtype=str)
 
     rows = {}
     for _, r in df.iterrows():
         sid = r["shape_id"]
         seq = int(r["shape_pt_sequence"])
-        lat = float(str(r["shape_pt_lat"]).replace(",", "."))
-        lon = float(str(r["shape_pt_lon"]).replace(",", "."))
+        lat = float(r["shape_pt_lat"])
+        lon = float(r["shape_pt_lon"])
         rows.setdefault(sid, []).append((seq, lat, lon))
 
     shapes = {}
+
     for sid, pts in rows.items():
         pts.sort(key=lambda x: x[0])
+
         lats = [p[1] for p in pts]
         lons = [p[2] for p in pts]
+
         cum = [0.0]
         for i in range(1, len(pts)):
-            a = (lats[i-1], lons[i-1])
+            a = (lats[i - 1], lons[i - 1])
             b = (lats[i], lons[i])
             cum.append(cum[-1] + geodesic(a, b).meters)
-        shapes[sid] = {"lats": lats, "lons": lons, "cum": cum}
+
+        shapes[sid] = dict(lats=lats, lons=lons, cum=cum)
+
     return shapes
 
 
 def measure_along_shape(shape, lat, lon):
     best = None
     best_i = 0
-    for i in range(len(shape["lats"]) - 1):
-        a = (shape["lats"][i], shape["lons"][i])
-        d = geodesic(a, (lat, lon)).meters
+    for i, (la, lo) in enumerate(zip(shape["lats"], shape["lons"])):
+        d = geodesic((la, lo), (lat, lon)).meters
         if best is None or d < best:
             best = d
             best_i = i
     return shape["cum"][best_i]
 
 
-def construir_todos_os_subtrechos(gtfs_zip_bytes: bytes) -> List[Subtrecho]:
+def construir_todos_os_subtrechos() -> List[Subtrecho]:
 
-    with zipfile.ZipFile(io.BytesIO(gtfs_zip_bytes)) as zf:
+    print("🌐 Baixando GTFS ZIP para pipeline...")
+
+    resp = requests.get(GTFS_STATIC_URL, timeout=60)
+    resp.raise_for_status()
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+
+        print("📥 Lendo GTFS...")
 
         stops = load_stops(zf)
         stop_times = load_stop_times(zf)
         trips = load_trips(zf)
         shapes = load_shapes(zf)
 
+        stops_to_shapes = {}
+
+        for tid, sid in trips.items():
+            seq = stop_times.get(tid)
+            if not seq:
+                continue
+            for stop in seq:
+                stops_to_shapes.setdefault(stop, set()).add(sid)
+
         subtrechos = []
 
-        for s1, s2 in PAIRS:
+        for (s1, s2) in PAIRS:
 
-            best = None
+            shapes_s1 = stops_to_shapes.get(s1, set())
+            shapes_s2 = stops_to_shapes.get(s2, set())
+            candidate_shapes = shapes_s1 & shapes_s2
+
+            if not candidate_shapes:
+                continue
+
+            lat1, lon1 = stops[s1]
+            lat2, lon2 = stops[s2]
+
+            best_shape = None
             best_dist = None
+            best_seq = None
 
-            for tid, seqs in stop_times.items():
+            for sid in candidate_shapes:
 
-                ids = [x[0] for x in seqs]
-                if s1 not in ids or s2 not in ids:
+                tids = [t for t, sh in trips.items() if sh == sid]
+                if not tids:
                     continue
 
-                i1 = ids.index(s1)
-                i2 = ids.index(s2)
+                seq = stop_times.get(tids[0])
+                if not seq:
+                    continue
 
+                if s1 not in seq or s2 not in seq:
+                    continue
+
+                i1 = seq.index(s1)
+                i2 = seq.index(s2)
                 if i2 <= i1:
                     continue
 
-                shape_id = trips.get(tid)
-                shape = shapes.get(shape_id)
-                if not shape:
-                    continue
-
-                m1 = measure_along_shape(shape, *stops[s1])
-                m2 = measure_along_shape(shape, *stops[s2])
+                m1 = measure_along_shape(shapes[sid], lat1, lon1)
+                m2 = measure_along_shape(shapes[sid], lat2, lon2)
 
                 if m2 <= m1:
                     continue
@@ -139,43 +175,43 @@ def construir_todos_os_subtrechos(gtfs_zip_bytes: bytes) -> List[Subtrecho]:
                 dist = m2 - m1
 
                 if best_dist is None or dist < best_dist:
-                    best = (seqs, shape, m1, m2)
+                    best_shape = shapes[sid]
                     best_dist = dist
+                    best_seq = seq
 
-            if not best:
+            if not best_shape:
                 continue
 
-            seqs, shape, m1, m2 = best
+            i1 = best_seq.index(s1)
+            i2 = best_seq.index(s2)
+            janela = best_seq[i1:i2 + 1]
 
-            ids = [x[0] for x in seqs]
-            window = ids[ids.index(s1):ids.index(s2)+1]
+            measures = {}
+            for sid in janela:
+                lat, lon = stops[sid]
+                measures[sid] = measure_along_shape(best_shape, lat, lon)
 
-            measures = {
-                sid: measure_along_shape(shape, *stops[sid])
-                for sid in window
-            }
+            for i in range(len(janela) - 1):
+                a = janela[i]
+                b = janela[i + 1]
 
-            for i in range(len(window) - 1):
-
-                a = window[i]
-                b = window[i+1]
                 ma = measures[a]
                 mb = measures[b]
 
                 if mb <= ma:
                     continue
 
-                dist_m = mb - ma
-
                 subtrechos.append(
                     Subtrecho(
                         s1=a,
                         s2=b,
-                        distance_m=dist_m,
+                        distance_m=mb - ma,
                         group=f"{s1}->{s2}",
                         source="shape",
                         polyline=[]
                     )
                 )
+
+        print(f"🏁 Pipeline gerou {len(subtrechos)} subtrechos")
 
         return subtrechos

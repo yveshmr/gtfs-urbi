@@ -12,6 +12,10 @@ from app.services.vehicles import update_vehicles
 
 from app.api.debug import router as debug_router
 
+# <<< NOVOS IMPORTS >>>
+from gtfs_core.pipeline_trechos import construir_todos_os_subtrechos
+from gtfs_core.pairs import PAIRS
+
 
 app = FastAPI(
     title="GTFS Live Backend",
@@ -79,6 +83,20 @@ def startup():
     print(f"✔ route_shapes criado: {len(rt.route_shapes)} combinações")
 
     #
+    # 7.1 — construir SUBTRECHOS a partir do pipeline GTFS
+    #
+    print("⏳ construindo subtrechos (pipeline GTFS)...")
+
+    try:
+        rt.subtrechos = construir_todos_os_subtrechos()
+        print(f"✔ subtrechos gerados: {len(rt.subtrechos)}")
+
+    except Exception as e:
+        print(f"⚠️ Falha ao gerar subtrechos: {e}")
+        rt.subtrechos = []
+
+
+    #
     # 8 — puxar vehicles GTFS-RT
     #
     update_vehicles()
@@ -89,6 +107,7 @@ def startup():
     print(f"Trips: {len(rt.trips)}")
     print(f"Stop times: {len(rt.stop_times)}")
     print(f"Shapes: {len(rt.shapes)}")
+    print(f"Subtrechos: {len(rt.subtrechos)}")
     print(f"Vehicles: {len(rt.vehicles)}")
 
     print("INFO:     Application startup complete.")
