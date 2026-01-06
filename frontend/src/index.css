@@ -1,0 +1,17 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Corrige layout — remove estilos padrão do Vite */
+body {
+  display: block;
+  background: #ffffff;
+}
+
+/* Garante que o mapa ocupe a tela toda */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+}
