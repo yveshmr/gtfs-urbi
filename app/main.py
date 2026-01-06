@@ -19,6 +19,15 @@ from app.services.subtrecho_persistence import persist_subtrechos_loop
 from gtfs_core.pipeline_trechos import construir_todos_os_subtrechos
 from app.services.realtime_subtrechos import build_subtrecho_index
 
+# <<< IMPORT DO MAPA >>>
+from app.api.map import router as map_router
+
+# <<< IMPORT SHAPES MAPA >>>
+from app.api.map_shapes import router as map_shapes_router
+
+# <<< IMPORT ROUTES MAPA >>>
+from app.api.map_routes import router as map_routes_router
+
 
 app = FastAPI(
     title="GTFS Live Backend",
@@ -127,9 +136,12 @@ def startup():
 
 
 #
-# DEBUG ROUTES
+# ROUTERS
 #
 app.include_router(debug_router)
+app.include_router(map_router)
+app.include_router(map_shapes_router)
+app.include_router(map_routes_router)
 
 
 @app.get("/")
