@@ -35,9 +35,14 @@ class MapVehicle(BaseModel):
 
     status: str = "in_progress"
 
+    # 👇👇👇 NOVO — heading calculado pelo backend
+    heading_deg: Optional[float] = None
+
+
 
 def _safe(v: dict, key: str) -> Any:
     return v.get(key)
+
 
 
 def _route_short_name(route_obj) -> Optional[str]:
@@ -48,15 +53,14 @@ def _route_short_name(route_obj) -> Optional[str]:
     if route_obj is None:
         return None
 
-    # caso seja objeto
     if hasattr(route_obj, "route_short_name"):
         return getattr(route_obj, "route_short_name")
 
-    # caso seja dict
     if isinstance(route_obj, dict):
         return route_obj.get("route_short_name")
 
     return None
+
 
 
 def get_active_map_vehicles() -> List[MapVehicle]:
@@ -103,6 +107,9 @@ def get_active_map_vehicles() -> List[MapVehicle]:
             last_update_ts=last_update_dt,
 
             status=_safe(v, "status") or "in_progress",
+
+            # 👇👇👇 AQUI PASSAMOS PRO FRONTEND
+            heading_deg=_safe(v, "heading_deg"),
         )
 
         vehicles.append(mv)

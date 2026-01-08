@@ -1,19 +1,24 @@
 from fastapi import APIRouter
-from typing import List
+from typing import Dict, List, Tuple
 
-from app.services.map_shapes import MapShape, get_all_map_shapes
-
+from app.services.map_shapes import get_all_map_shapes
 
 router = APIRouter(
     prefix="/map",
-    tags=["map"],
+    tags=["map-shapes"]
 )
 
 
-@router.get("/shapes", response_model=List[MapShape])
-def list_map_shapes():
+@router.get("/shapes")
+def list_map_shapes() -> Dict[str, List[Tuple[float, float]]]:
     """
-    Retorna todas as shapes do GTFS estático,
-    no formato amigável ao frontend de mapa.
+    Endpoint simples que retorna:
+      {
+        "shape_id": [
+          [lat, lon],
+          ...
+        ]
+      }
     """
+
     return get_all_map_shapes()

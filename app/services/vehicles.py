@@ -1,5 +1,6 @@
 import time
 import httpx
+import math
 
 from app.core.state import rt
 from app.core.config import URL_VEHICLE_POSITIONS
@@ -11,6 +12,7 @@ from google.transit import gtfs_realtime_pb2
 
 
 AVG_WINDOW_SEC = 900  # 10 min
+HEADING_RADIUS_M = 15.0
 
 
 def parse_speed(speed_raw):
@@ -22,10 +24,61 @@ def parse_speed(speed_raw):
         return None
 
 
+#
+# ========= HEADING CARTESIANO A PARTIR DO SHAPE =========
+#
+def compute_heading_from_shape(points, pos_m, radius_m=HEADING_RADIUS_M):
+    """
+    Heading cartesiano puro, baseado no segmento do shape
+    que cruza um raio em torno da posição projetada.
+
+    - Usa apenas geometria local
+    - Respeita o sentido crescente do shape
+    - NÃO aplica correções de eixo (Leaflet, norte, etc.)
+    """
+
+    if not points or pos_m is None:
+        return None
+
+    pos_m = float(pos_m)
+
+    # coletar segmentos que cruzam o intervalo [pos_m - R, pos_m + R]
+    candidates = []
+
+    for i in range(len(points) - 1):
+        lat1, lon1, d1 = points[i]
+        lat2, lon2, d2 = points[i + 1]
+
+        # verifica interseção do segmento com o intervalo
+        if d2 < pos_m - radius_m:
+            continue
+        if d1 > pos_m + radius_m:
+            break
+
+        candidates.append((lat1, lon1, lat2, lon2, d1, d2))
+
+    if not candidates:
+        return None
+
+    # escolher o segmento mais próximo à posição projetada
+    seg = min(
+        candidates,
+        key=lambda s: abs(((s[4] + s[5]) / 2.0) - pos_m)
+    )
+
+    lat1, lon1, lat2, lon2, _, _ = seg
+
+    dx = lon2 - lon1
+    dy = lat2 - lat1
+
+    if dx == 0 and dy == 0:
+        return None
+
+    heading = math.degrees(math.atan2(dy, dx))
+    return round(heading, 2)
+
+
 def prune_old_measurements(now_ts: int):
-    """
-    Mantém apenas medições ainda dentro da janela móvel
-    """
     cutoff = now_ts - AVG_WINDOW_SEC
 
     for key, lst in list(rt.subtrecho_times.items()):
@@ -61,9 +114,6 @@ def update_vehicles():
     if not hasattr(rt, "subtrecho_stats"):
         rt.subtrecho_stats = {}
 
-    #
-    # LIMPA MEDIÇÕES ANTIGAS
-    #
     prune_old_measurements(now)
 
     for entity in feed.entity:
@@ -98,13 +148,13 @@ def update_vehicles():
         }
 
         v["status"] = "on_route" if route_id else "off_route"
-
         v["shape_id"] = None
         v["shape_pos_m"] = None
         v["shape_len_m"] = None
         v["progress"] = None
         v["speed_avg_kmh"] = None
         v["eta"] = None
+        v["heading_deg"] = None
 
         if route_id:
 
@@ -127,95 +177,15 @@ def update_vehicles():
                     v["progress"] = v["shape_pos_m"] / v["shape_len_m"]
 
                 #
-                # SUBTRECHOS
+                # 🔥 HEADING GEOMÉTRICO LOCAL (RAIO)
                 #
                 try:
-                    current = rt.vehicle_subtrecho_state.get(vehicle_id)
-                    detected = None
-
-                    if v["shape_id"] and v["shape_pos_m"] is not None:
-                        detected = find_subtrecho_for_position(
-                            v["shape_id"],
-                            v["shape_pos_m"]
-                        )
-
-                    #
-                    # entrou
-                    #
-                    if detected and (not current or current.get("subtrecho") != detected):
-
-                        rt.vehicle_subtrecho_state[vehicle_id] = {
-                            "subtrecho": detected,
-                            "entered_at": now
-                        }
-
-                        print(
-                            f"🚍 veículo {vehicle_id} entrou em "
-                            f"{detected.s1}->{detected.s2} "
-                            f"(shape {detected.shape_id})"
-                        )
-
-                    #
-                    # saiu
-                    #
-                    if current and not detected:
-
-                        st = current["subtrecho"]
-                        start_ts = current["entered_at"]
-                        end_ts = now
-                        duration = max(1, end_ts - start_ts)
-
-                        #
-                        # --- OUTLIERS ---
-                        #
-                        if duration < 5:
-                            continue
-
-                        if duration > 1800:
-                            continue
-
-                        key_triplet = (st.shape_id, st.s1, st.s2)
-
-                        rt.subtrecho_times.setdefault(key_triplet, []).append({
-                            "vehicle_id": vehicle_id,
-                            "start_ts": start_ts,
-                            "end_ts": end_ts,
-                            "duration_s": duration,
-                        })
-
-                        print(
-                            f"🏁 veículo {vehicle_id} saiu de "
-                            f"{st.s1}->{st.s2} "
-                            f"(shape {st.shape_id}) "
-                            f"({duration}s)"
-                        )
-
-                        #
-                        # AGGREGAÇÃO — SÓ SE HOUVER MEDIÇÕES RECENTES
-                        #
-                        cutoff = now - AVG_WINDOW_SEC
-
-                        recent = [
-                            m for m in rt.subtrecho_times[key_triplet]
-                            if m["end_ts"] >= cutoff
-                        ]
-
-                        if recent:
-                            avg = sum(m["duration_s"] for m in recent) / len(recent)
-
-                            rt.subtrecho_stats[key_triplet] = {
-                                "window_start": min(m["end_ts"] for m in recent),
-                                "window_end": max(m["end_ts"] for m in recent),
-                                "n": len(recent),
-                                "avg_s": round(avg, 1),
-                            }
-                        else:
-                            rt.subtrecho_stats.pop(key_triplet, None)
-
-                        rt.vehicle_subtrecho_state.pop(vehicle_id, None)
-
-                except Exception as e:
-                    print(f"⚠️ erro realtime subtrecho: {e}")
+                    v["heading_deg"] = compute_heading_from_shape(
+                        pts,
+                        v["shape_pos_m"]
+                    )
+                except:
+                    v["heading_deg"] = None
 
         vehicles[vehicle_id] = v
 

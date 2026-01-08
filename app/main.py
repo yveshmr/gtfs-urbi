@@ -43,6 +43,19 @@ app.add_middleware(
 )
 
 
+async def vehicles_loop():
+    """
+    Atualiza as posições dos veículos periodicamente.
+    """
+    while True:
+        try:
+            update_vehicles()
+        except Exception as e:
+            print("⚠ vehicle loop error:", e)
+
+        await asyncio.sleep(10)   # intervalo em segundos
+
+
 @app.on_event("startup")
 def startup():
 
@@ -114,7 +127,7 @@ def startup():
         rt.subtrechos = []
 
     #
-    # 8 — puxar vehicles GTFS-RT
+    # 8 — puxar vehicles GTFS-RT uma vez
     #
     update_vehicles()
 
@@ -133,6 +146,11 @@ def startup():
     # LOOP DE SNAPSHOT 10min
     #
     asyncio.create_task(persist_subtrechos_loop())
+
+    #
+    # LOOP DE ATUALIZAÇÃO DE VEÍCULOS
+    #
+    asyncio.create_task(vehicles_loop())
 
 
 #

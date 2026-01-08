@@ -1,42 +1,40 @@
-from __future__ import annotations
-
-from typing import List, Tuple, Optional
-
-from pydantic import BaseModel
-
+from typing import Dict, List, Tuple
 from app.core.state import rt
 
 
-class MapShape(BaseModel):
+def normalize_point(p):
     """
-    Representa uma polyline de shape GTFS
-    para consumo no frontend de mapa.
-    """
-
-    shape_id: str
-    points: List[Tuple[float, float]]  # (lat, lon)
-
-
-def get_all_map_shapes() -> List[MapShape]:
-    """
-    Converte as shapes do GTFS estático para DTOs
-    utilizados na visão de mapa.
-
-    As shapes já estão carregadas em memória.
+    Aceita:
+      • objeto com lat/lon
+      • dict {"lat": .., "lon": ..}
+      • tupla/lista (lat, lon)
+    Retorna: (lat, lon)
     """
 
-    shapes: List[MapShape] = []
+    # caso seja objeto (p.lat)
+    if hasattr(p, "lat") and hasattr(p, "lon"):
+        return (p.lat, p.lon)
 
-    for shape_id, pts in rt.shapes.items():
+    # caso dict
+    if isinstance(p, dict):
+        return (float(p["lat"]), float(p["lon"]))
 
-        # garantimos formato (lat, lon)
-        coords = [(p.lat, p.lon) if hasattr(p, "lat") else (p[0], p[1]) for p in pts]
+    # caso tuple/list
+    if isinstance(p, (list, tuple)) and len(p) == 2:
+        return (float(p[0]), float(p[1]))
 
-        shapes.append(
-            MapShape(
-                shape_id=shape_id,
-                points=coords
-            )
-        )
+    raise ValueError(f"Formato de ponto desconhecido: {p}")
 
-    return shapes
+
+def get_all_map_shapes() -> Dict[str, List[Tuple[float, float]]]:
+    """
+    Expõe os shapes do runtime em formato:
+      shape_id -> [(lat, lon), ...]
+    """
+
+    shapes_dict = {}
+
+    for sid, pts in rt.shapes.items():
+        shapes_dict[sid] = [normalize_point(p) for p in pts]
+
+    return shapes_dict
