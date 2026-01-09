@@ -1,50 +1,35 @@
-import zipfile
-import io
-import pandas as pd
-import httpx
-
-from app.core.config import URL_GTFS_STATIC_ZIP
 from app.geometry.distance import haversine_m
 from app.core.state import rt
 
 
 def load_shapes():
     """
-    Lê shapes.txt do ZIP GTFS e popula rt.shapes
-    Cada shape vira:
-    {
-        shape_id: [
-            (lat, lon, dist_m_acumulada),
-            ...
-        ]
-    }
+    Constrói shapes com distância acumulada A PARTIR dos shapes
+    já carregados no runtime (rt.shapes).
+
+    Espera rt.shapes no formato:
+        shape_id -> list[ { lat, lon, seq } ]
+
+    Converte para:
+        shape_id -> list[ (lat, lon, dist_m_acumulada) ]
     """
 
-    print("⏳ carregando shapes ...")
+    print("⏳ construindo shapes com distância acumulada ...")
 
-    resp = httpx.get(URL_GTFS_STATIC_ZIP, timeout=60)
-    resp.raise_for_status()
+    if not getattr(rt, "shapes", None):
+        raise RuntimeError("rt.shapes não está carregado")
 
-    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    shapes_out = {}
 
-    df = pd.read_csv(zf.open("shapes.txt"))
-
-    shapes = {}
-
-    grouped = df.groupby("shape_id")
-
-    for sid, g in grouped:
-
-        pts = g.sort_values("shape_pt_sequence")
+    for sid, pts in rt.shapes.items():
 
         acc = 0.0
         out = []
-
         prev = None
 
-        for _, r in pts.iterrows():
-            lat = float(r["shape_pt_lat"])
-            lon = float(r["shape_pt_lon"])
+        for p in pts:
+            lat = float(p["lat"])
+            lon = float(p["lon"])
 
             if prev:
                 acc += haversine_m(prev[0], prev[1], lat, lon)
@@ -52,8 +37,8 @@ def load_shapes():
             out.append((lat, lon, acc))
             prev = (lat, lon)
 
-        shapes[sid] = out
+        shapes_out[sid] = out
 
-    rt.shapes = shapes
+    rt.shapes = shapes_out
 
-    print(f"✔ shapes carregados: {len(rt.shapes)}")
+    print(f"✔ shapes processados: {len(rt.shapes)}")

@@ -1,16 +1,28 @@
 import csv
-import io
-import zipfile
-import httpx
+import pickle
+from pathlib import Path
+from datetime import datetime
 from collections import defaultdict
 
-from app.core.config import URL_GTFS_STATIC_ZIP
+from app.core.config import GTFS_DIR
 from app.core.state import rt
+
+
+CACHE_DIR = Path("data/cache/gtfs_parsed")
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _today_str():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _cache_path():
+    return CACHE_DIR / f"stop_times_{_today_str()}.pkl"
 
 
 def load_stop_times():
     """
-    Carrega stop_times.txt direto do ZIP GTFS.
+    Carrega stop_times.txt do GTFS estático com cache diário.
 
     Retorna:
         dict: trip_id -> lista ordenada de dicts:
@@ -21,22 +33,39 @@ def load_stop_times():
                 departure_time
             }
 
-    E constrói também:
+    Também popula:
         rt.shape_stop_sequence:
             shape_id -> { stop_id -> ordem_no_shape }
     """
 
-    resp = httpx.get(URL_GTFS_STATIC_ZIP, timeout=60)
-    resp.raise_for_status()
+    cache_file = _cache_path()
 
-    z = zipfile.ZipFile(io.BytesIO(resp.content))
+    # --------------------------------------------------
+    # 1️⃣ Tenta carregar cache
+    # --------------------------------------------------
+    if cache_file.exists():
+        try:
+            with open(cache_file, "rb") as f:
+                data = pickle.load(f)
 
-    with z.open("stop_times.txt") as f:
-        rows = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+            rt.shape_stop_sequence = data["shape_stop_sequence"]
+            return data["stop_times"]
 
-        stop_times = defaultdict(list)
+        except Exception:
+            # cache corrompido → refaz tudo
+            pass
 
-        for row in rows:
+    # --------------------------------------------------
+    # 2️⃣ Parsing do CSV (local, já baixado)
+    # --------------------------------------------------
+    path = GTFS_DIR / "stop_times.txt"
+
+    stop_times = defaultdict(list)
+
+    with open(path, encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+
+        for row in reader:
             trip = row["trip_id"]
 
             stop_times[trip].append({
@@ -46,14 +75,13 @@ def load_stop_times():
                 "departure_time": row["departure_time"],
             })
 
-    # garantir ordenação por trip
+    # ordenar por trip
     for trip_id in stop_times:
         stop_times[trip_id].sort(key=lambda x: x["stop_sequence"])
 
-    # =====================================================
-    # NOVO: construir índice shape -> stop_sequence
-    # =====================================================
-
+    # --------------------------------------------------
+    # 3️⃣ Construir shape -> stop_sequence
+    # --------------------------------------------------
     shape_stop_sequence = defaultdict(dict)
 
     for trip_id, stops in stop_times.items():
@@ -69,11 +97,22 @@ def load_stop_times():
         for idx, st in enumerate(stops):
             stop_id = st["stop_id"]
 
-            # só grava a PRIMEIRA ocorrência no shape
+            # só grava a primeira ocorrência
             if stop_id not in shape_stop_sequence[shape_id]:
                 shape_stop_sequence[shape_id][stop_id] = idx
 
-    # expõe no runtime
     rt.shape_stop_sequence = dict(shape_stop_sequence)
+
+    # --------------------------------------------------
+    # 4️⃣ Salvar cache
+    # --------------------------------------------------
+    try:
+        with open(cache_file, "wb") as f:
+            pickle.dump({
+                "stop_times": dict(stop_times),
+                "shape_stop_sequence": rt.shape_stop_sequence
+            }, f)
+    except Exception as e:
+        print(f"⚠️ Falha ao salvar cache de stop_times: {e}")
 
     return dict(stop_times)
