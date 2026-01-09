@@ -15,18 +15,19 @@ from app.services.vehicles import update_vehicles
 from app.api.debug import router as debug_router
 from app.services.subtrecho_persistence import persist_subtrechos_loop
 
-# <<< NOVOS IMPORTS >>>
+# ================= PIPELINE SUBTRECHOS =================
 from gtfs_core.pipeline_trechos import construir_todos_os_subtrechos
 from app.services.realtime_subtrechos import build_subtrecho_index
 
-# <<< IMPORT DO MAPA >>>
+# ================= SHAPE → STOP SEQUENCE =================
+from app.services.shape_stop_sequence import build_shape_stop_sequence
+
+# ================= MAPA =================
 from app.api.map import router as map_router
-
-# <<< IMPORT SHAPES MAPA >>>
 from app.api.map_shapes import router as map_shapes_router
-
-# <<< IMPORT ROUTES MAPA >>>
 from app.api.map_routes import router as map_routes_router
+from app.api.map_subtrechos_stop import router as map_subtrechos_stop_router
+from app.api.map_subtrechos_shape import router as map_subtrechos_shape_router
 
 
 app = FastAPI(
@@ -43,92 +44,99 @@ app.add_middleware(
 )
 
 
+# =========================================================
+# LOOP DE VEÍCULOS (POOLING = 10s — igual ao monolítico)
+# =========================================================
 async def vehicles_loop():
-    """
-    Atualiza as posições dos veículos periodicamente.
-    """
     while True:
         try:
             update_vehicles()
         except Exception as e:
             print("⚠ vehicle loop error:", e)
 
-        await asyncio.sleep(10)   # intervalo em segundos
+        await asyncio.sleep(10)
 
 
+# =========================================================
+# STARTUP
+# =========================================================
 @app.on_event("startup")
 def startup():
 
     print("🔹 Starting GTFS Live backend...")
 
-    #
-    # 1 — garantir GTFS estático
-    #
+    # -----------------------------------------------------
+    # 1 — GTFS ESTÁTICO
+    # -----------------------------------------------------
     ensure_gtfs_static()
 
-    #
-    # 2 — carregar shapes
-    #
+    # -----------------------------------------------------
+    # 2 — SHAPES
+    # -----------------------------------------------------
     print("⏳ carregando shapes ...")
     rt.shapes = load_shapes()
     print(f"✔ shapes carregados: {len(rt.shapes)}")
 
-    #
-    # 3 — carregar stop_times
-    #
+    # -----------------------------------------------------
+    # 3 — STOP_TIMES
+    # -----------------------------------------------------
     print("⏳ carregando stop_times ...")
     rt.stop_times = load_stop_times()
-    print(f"✔ stop_times carregados: {len(rt.stop_times)} trips com horários")
+    print(f"✔ stop_times carregados: {len(rt.stop_times)} trips")
 
-    #
-    # 4 — carregar stops
-    #
+    # -----------------------------------------------------
+    # 4 — STOPS
+    # -----------------------------------------------------
     print("⏳ carregando stops ...")
     rt.stops = load_stops()
     print(f"✔ stops carregados: {len(rt.stops)}")
 
-    #
-    # 5 — carregar routes
-    #
+    # -----------------------------------------------------
+    # 5 — ROUTES
+    # -----------------------------------------------------
     print("⏳ carregando routes ...")
     rt.routes = load_routes()
     print(f"✔ routes carregadas: {len(rt.routes)}")
 
-    #
-    # 6 — carregar trips
-    #
+    # -----------------------------------------------------
+    # 6 — TRIPS
+    # -----------------------------------------------------
     print("⏳ carregando trips ...")
     rt.trips = load_trips()
     print(f"✔ trips carregadas: {len(rt.trips)}")
 
-    #
-    # 7 — construir route→direction→shape
-    #
+    # -----------------------------------------------------
+    # 7 — ROUTE → DIRECTION → SHAPE
+    # (SEM fallback de direction_id)
+    # -----------------------------------------------------
     rt.route_shapes = build_route_shape_index(rt.trips)
     print(f"✔ route_shapes criado: {len(rt.route_shapes)} combinações")
 
-    #
-    # 7.1 — construir SUBTRECHOS a partir do pipeline GTFS
-    #
-    print("⏳ construindo subtrechos (pipeline GTFS)...")
+    # -----------------------------------------------------
+    # 7.1 — SHAPE → STOP_SEQUENCE (MONOLÍTICO)
+    # -----------------------------------------------------
+    print("⏳ construindo shape_stop_sequence ...")
+    build_shape_stop_sequence()
+    print(f"✔ shape_stop_sequence criado: {len(rt.shape_stop_sequence)} shapes")
 
+    # -----------------------------------------------------
+    # 7.2 — SUBTRECHOS (PIPELINE GTFS)
+    # -----------------------------------------------------
+    print("⏳ construindo subtrechos (pipeline GTFS)...")
     try:
         rt.subtrechos = construir_todos_os_subtrechos()
         print(f"✔ subtrechos gerados: {len(rt.subtrechos)}")
 
-        #
-        # índice realtime
-        #
         build_subtrecho_index()
-        print("✔ índice de subtrechos para realtime criado")
+        print("✔ índice de subtrechos por shape criado")
 
     except Exception as e:
         print(f"⚠️ Falha ao gerar subtrechos: {e}")
         rt.subtrechos = []
 
-    #
-    # 8 — puxar vehicles GTFS-RT uma vez
-    #
+    # -----------------------------------------------------
+    # 8 — PRIMEIRA CARGA DE VEÍCULOS
+    # -----------------------------------------------------
     update_vehicles()
 
     print("Startup complete")
@@ -140,26 +148,28 @@ def startup():
     print(f"Subtrechos: {len(rt.subtrechos)}")
     print(f"Vehicles: {len(rt.vehicles)}")
 
-    print("INFO:     Application startup complete.")
+    print("INFO: Application startup complete.")
 
-    #
-    # LOOP DE SNAPSHOT 10min
-    #
+    # -----------------------------------------------------
+    # LOOP DE SNAPSHOT (CSV)
+    # -----------------------------------------------------
     asyncio.create_task(persist_subtrechos_loop())
 
-    #
-    # LOOP DE ATUALIZAÇÃO DE VEÍCULOS
-    #
+    # -----------------------------------------------------
+    # LOOP DE VEÍCULOS
+    # -----------------------------------------------------
     asyncio.create_task(vehicles_loop())
 
 
-#
+# =========================================================
 # ROUTERS
-#
+# =========================================================
 app.include_router(debug_router)
 app.include_router(map_router)
 app.include_router(map_shapes_router)
 app.include_router(map_routes_router)
+app.include_router(map_subtrechos_stop_router)
+app.include_router(map_subtrechos_shape_router)
 
 
 @app.get("/")
@@ -167,12 +177,10 @@ def root():
     return {"status": "ok", "service": "gtfs-live-backend"}
 
 
-
-# ==========================================================
-# 🚑 HEALTH — compatível com o monolítico
-# ==========================================================
-
-AVG_WINDOW_SEC = 900   # 10 minutos
+# =========================================================
+# HEALTH
+# =========================================================
+AVG_WINDOW_SEC = 900  # 15 minutos
 
 
 @app.get("/health", response_class=JSONResponse)
@@ -181,19 +189,16 @@ def health():
     now = int(time.time())
     cutoff = now - AVG_WINDOW_SEC
 
-    total_keys = len(getattr(rt, "subtrecho_times", {}))
+    total_keys = len(getattr(rt, "subtrecho_times_by_shape", {}))
 
     segments_recent = 0
     measurements_recent = 0
 
-    if hasattr(rt, "subtrecho_times"):
-
-        for lst in rt.subtrecho_times.values():
-            recent = [m for m in lst if m["end_ts"] >= cutoff]
-
-            if recent:
-                segments_recent += 1
-                measurements_recent += len(recent)
+    for lst in getattr(rt, "subtrecho_times_by_shape", {}).values():
+        recent = [m for m in lst if m["end_ts"] >= cutoff]
+        if recent:
+            segments_recent += 1
+            measurements_recent += len(recent)
 
     avg_samples = (
         measurements_recent / segments_recent
@@ -205,8 +210,8 @@ def health():
         "vehicles_total": len(rt.vehicles),
         "subtrechos": {
             "total_keys": total_keys,
-            "segments_with_data_last_10m": segments_recent,
-            "measurements_last_10m": measurements_recent,
+            "segments_with_data_last_15m": segments_recent,
+            "measurements_last_15m": measurements_recent,
             "avg_samples_per_segment": round(avg_samples, 2),
         }
     }

@@ -1,42 +1,27 @@
 import logging
 from typing import Dict, List, Optional
-
 from app.core.state import rt
 from gtfs_core.pipeline_trechos import Subtrecho
 
 logger = logging.getLogger(__name__)
 
-"""
-Realtime Subtrechos
-
-✔ (shape_id, shape_pos_m) → Subtrecho
-"""
-
-# shape_id -> lista ordenada por m1
 subtrechos_by_shape: Dict[str, List[Subtrecho]] = {}
 
 
 def build_subtrecho_index():
-    """
-    Constrói índice de subtrechos agrupado por shape_id.
-    """
-
     global subtrechos_by_shape
     subtrechos_by_shape.clear()
 
     for s in rt.subtrechos:
         if not s.shape_id:
             continue
-
         subtrechos_by_shape.setdefault(s.shape_id, []).append(s)
 
-    # ordenar
-    for sid, lst in subtrechos_by_shape.items():
+    for lst in subtrechos_by_shape.values():
         lst.sort(key=lambda x: x.m1)
 
     logger.info(
-        f"Índice de subtrechos criado: "
-        f"{len(subtrechos_by_shape)} shapes indexados"
+        f"Índice de subtrechos: {len(subtrechos_by_shape)} shapes"
     )
 
 

@@ -8,6 +8,7 @@ Pipeline GTFS → SUBTRECHOS
 ✔ processa TUDO em memória
 ✔ percorre apenas shapes que passam pelos dois stops
 ✔ cria subtrechos entre stops intermediários
+✔ preenche geometria (polyline) por metragem acumulada
 """
 
 import io
@@ -101,7 +102,6 @@ def measure_along_shape(shape, lat, lon):
     best = None
     best_i = 0
     for i, (la, lo) in enumerate(zip(shape["lats"], shape["lons"])):
-
         d = geodesic((la, lo), (lat, lon)).meters
         if best is None or d < best:
             best = d
@@ -152,6 +152,8 @@ def construir_todos_os_subtrechos() -> List[Subtrecho]:
             best_dist = None
             best_seq = None
             best_sid = None
+            best_m1 = None
+            best_m2 = None
 
             for sid in candidate_shapes:
 
@@ -184,6 +186,8 @@ def construir_todos_os_subtrechos() -> List[Subtrecho]:
                     best_dist = dist
                     best_seq = seq
                     best_sid = sid
+                    best_m1 = m1
+                    best_m2 = m2
 
             if not best_shape:
                 continue
@@ -207,6 +211,20 @@ def construir_todos_os_subtrechos() -> List[Subtrecho]:
                 if mb <= ma:
                     continue
 
+                # === GEOMETRIA DO SUBTRECHO (DEFINITIVA) ===
+                polyline = [
+                    (lat, lon)
+                    for lat, lon, m in zip(
+                        best_shape["lats"],
+                        best_shape["lons"],
+                        best_shape["cum"]
+                    )
+                    if ma <= m <= mb
+                ]
+
+                if len(polyline) < 2:
+                    continue
+
                 subtrechos.append(
                     Subtrecho(
                         s1=a,
@@ -214,7 +232,7 @@ def construir_todos_os_subtrechos() -> List[Subtrecho]:
                         distance_m=mb - ma,
                         group=f"{s1}->{s2}",
                         source="shape",
-                        polyline=[],
+                        polyline=polyline,
                         m1=ma,
                         m2=mb,
                         shape_id=best_sid,

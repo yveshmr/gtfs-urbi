@@ -1,38 +1,28 @@
 import {
   MapContainer,
   TileLayer,
+  Polyline,
   Marker,
   Popup,
-  LayersControl,
-  useMap
+  ZoomControl,
+  LayersControl
 } from "react-leaflet";
 import { useEffect, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 const { BaseLayer } = LayersControl;
-
 const API = "http://127.0.0.1:8000";
 
 //
-// ================= ICONS =================
+// ================= ICON =================
 //
-
-// 🔵 Bolinha SVG inline — 16x16
 const circleIcon = (color = "#999") =>
   L.divIcon({
     html: `
-      <svg xmlns="http://www.w3.org/2000/svg"
-           width="16" height="16"
-           viewBox="0 0 16 16">
-        <circle
-          cx="8"
-          cy="8"
-          r="7"
-          fill="${color}"
-          stroke="white"
-          stroke-width="1"
-        />
+      <svg width="16" height="16">
+        <circle cx="8" cy="8" r="6"
+          fill="${color}" stroke="white" stroke-width="2" />
       </svg>
     `,
     className: "",
@@ -41,11 +31,10 @@ const circleIcon = (color = "#999") =>
   });
 
 //
-// ============ COLOR SCALE FUNCTION =========
+// ============ COLOR SCALE ============
 //
 function speedColor(v) {
   if (v == null) return "#cccccc";
-  if (v === 0) return "#cccccc";
   if (v < 10) return "#800080";
   if (v < 15) return "#ff0000";
   if (v < 20) return "#ff8800";
@@ -54,159 +43,227 @@ function speedColor(v) {
 }
 
 //
-// ================= LEGEND CONTROL =================
+// ============ LEGEND ============
 //
-function SpeedLegend() {
-  const map = useMap();
+function Legend() {
+  const items = [
+    { label: "< 10 km/h", color: "#800080" },
+    { label: "10–15 km/h", color: "#ff0000" },
+    { label: "15–20 km/h", color: "#ff8800" },
+    { label: "20–30 km/h", color: "#ffdd00" },
+    { label: "> 30 km/h", color: "#00aa00" },
+  ];
 
-  useEffect(() => {
-
-    const legend = L.control({ position: "bottomleft" });
-
-    legend.onAdd = function () {
-      const div = L.DomUtil.create("div", "speed-legend");
-
-      div.innerHTML = `
-        <div style="
-          background: rgba(255,255,255,0.95);
-          padding: 8px 10px;
-          border-radius: 4px;
-          font-size: 12px;
-          line-height: 18px;
-          box-shadow: 0 0 6px rgba(0,0,0,0.3);
-        ">
-          <b>Velocidade (km/h)</b>
-
-          <div style="display:flex;align-items:center;margin-top:4px;">
-            <span style="width:10px;height:10px;border-radius:50%;
-                         background:#cccccc;border:1px solid #fff;
-                         display:inline-block;margin-right:6px;"></span>
-            sem dado
-          </div>
-
-          <div style="display:flex;align-items:center;">
-            <span style="width:10px;height:10px;border-radius:50%;
-                         background:#800080;border:1px solid #fff;
-                         display:inline-block;margin-right:6px;"></span>
-            &lt; 10
-          </div>
-
-          <div style="display:flex;align-items:center;">
-            <span style="width:10px;height:10px;border-radius:50%;
-                         background:#ff0000;border:1px solid #fff;
-                         display:inline-block;margin-right:6px;"></span>
-            10 – 14
-          </div>
-
-          <div style="display:flex;align-items:center;">
-            <span style="width:10px;height:10px;border-radius:50%;
-                         background:#ff8800;border:1px solid #fff;
-                         display:inline-block;margin-right:6px;"></span>
-            15 – 19
-          </div>
-
-          <div style="display:flex;align-items:center;">
-            <span style="width:10px;height:10px;border-radius:50%;
-                         background:#ffdd00;border:1px solid #fff;
-                         display:inline-block;margin-right:6px;"></span>
-            20 – 29
-          </div>
-
-          <div style="display:flex;align-items:center;">
-            <span style="width:10px;height:10px;border-radius:50%;
-                         background:#00aa00;border:1px solid #fff;
-                         display:inline-block;margin-right:6px;"></span>
-            ≥ 30
-          </div>
+  return (
+    <div style={{
+      position: "fixed",
+      bottom: 16,
+      left: 16,
+      background: "white",
+      padding: 10,
+      borderRadius: 6,
+      boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+      fontSize: 12,
+      zIndex: 1500
+    }}>
+      <b>Velocidade</b>
+      {items.map(i => (
+        <div key={i.label} style={{ display: "flex", alignItems: "center" }}>
+          <div style={{
+            width: 10,
+            height: 10,
+            borderRadius: "50%",
+            background: i.color,
+            marginRight: 6
+          }} />
+          {i.label}
         </div>
-      `;
-
-      return div;
-    };
-
-    legend.addTo(map);
-    return () => legend.remove();
-
-  }, [map]);
-
-  return null;
+      ))}
+    </div>
+  );
 }
 
 export default function MapView() {
 
   const [vehicles, setVehicles] = useState([]);
+  const [subtrechos, setSubtrechos] = useState([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [clock, setClock] = useState("");
 
-  //
-  // Load vehicles periodically
-  //
+  const [layers, setLayers] = useState({
+    vehicles: true,
+    subtrechos: false,
+  });
+
+  // ===== relógio =====
   useEffect(() => {
+    const t = setInterval(() => {
+      setClock(new Date().toLocaleTimeString());
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
 
+  // ===== veículos =====
+  useEffect(() => {
     function load() {
       fetch(`${API}/map/vehicles`)
         .then(r => r.json())
         .then(setVehicles)
         .catch(console.error);
     }
-
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
 
+  // ===== subtrechos =====
+  useEffect(() => {
+    if (!layers.subtrechos) return;
+    fetch(`${API}/map/subtrechos/shape`)
+      .then(r => r.json())
+      .then(setSubtrechos)
+      .catch(console.error);
+  }, [layers.subtrechos]);
+
   return (
-    <MapContainer
-      center={[-15.8, -47.9]}
-      zoom={11}
-      style={{ height: "100vh", width: "100%" }}
-    >
+    <>
+      {/* ================= HEADER ================= */}
+      <div style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 50,
+        background: "#0b66ff",
+        color: "white",
+        display: "flex",
+        alignItems: "center",
+        padding: "0 16px",
+        zIndex: 2000
+      }}>
+        <div
+          style={{ cursor: "pointer", fontSize: 22, marginRight: 16 }}
+          onClick={() => setMenuOpen(!menuOpen)}
+        >
+          ☰
+        </div>
 
-      <LayersControl position="topright">
+        <div style={{ fontWeight: "bold", flex: 1 }}>
+          URBI • Monitoramento
+        </div>
 
-        {/* ================= MAPA DE TRÂNSITO ================= */}
-        <BaseLayer checked name="Mapa de Trânsito">
-          <TileLayer
-            url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
-            attribution="&copy; Stadia Maps &copy; OpenMapTiles &copy; OpenStreetMap"
-          />
-        </BaseLayer>
+        <div style={{ fontFamily: "monospace" }}>
+          {clock}
+        </div>
+      </div>
 
-        {/* ================= SATÉLITE (SEM LABELS) ================= */}
-        <BaseLayer name="Satélite">
-          <TileLayer
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            attribution="&copy; Esri"
-          />
-        </BaseLayer>
+      {/* ================= DRAWER ================= */}
+      <div style={{
+        position: "fixed",
+        top: 50,
+        left: menuOpen ? 0 : -280,
+        width: 260,
+        height: "calc(100% - 50px)",
+        background: "#ffffff",
+        boxShadow: menuOpen ? "2px 0 8px rgba(0,0,0,0.25)" : "none",
+        transition: "left 0.3s",
+        padding: 16,
+        zIndex: 1900,
+        pointerEvents: menuOpen ? "auto" : "none"
+      }}>
+        <h3>Camadas</h3>
 
-      </LayersControl>
+        <label>
+          <input
+            type="checkbox"
+            checked={layers.vehicles}
+            onChange={() =>
+              setLayers(l => ({ ...l, vehicles: !l.vehicles }))
+            }
+          /> Velocidade dos veículos
+        </label>
 
-      {/* ================= LEGENDA ================= */}
-      <SpeedLegend />
+        <br />
 
-      {/* ================= VEHICLES ================= */}
-      {vehicles.map(v => {
+        <label>
+          <input
+            type="checkbox"
+            checked={layers.subtrechos}
+            onChange={() =>
+              setLayers(l => ({ ...l, subtrechos: !l.subtrechos }))
+            }
+          /> Velocidade dos trechos (shape)
+        </label>
+      </div>
 
-        if (!v.lat || !v.lon) return null;
+      {/* ================= MAP ================= */}
+      <div style={{
+        position: "absolute",
+        top: 50,
+        left: 0,
+        right: 0,
+        bottom: 0
+      }}>
+        <MapContainer
+          center={[-15.8, -47.9]}
+          zoom={11}
+          zoomControl={false}
+          style={{ height: "100%", width: "100%" }}
+        >
+          <ZoomControl position="bottomright" />
 
-        const color = speedColor(v.speed_kmh);
-        const icon = circleIcon(color);
+          {/* 🔽 ÚNICA PARTE ALTERADA 🔽 */}
+          <LayersControl position="topright">
 
-        return (
-          <Marker
-            key={v.vehicle_id}
-            position={[v.lat, v.lon]}
-            icon={icon}
-          >
-            <Popup>
-              <b>Veículo:</b> {v.vehicle_label}<br />
-              <b>Linha:</b> {v.route_short_name || v.route_id || ""}<br />
-              <b>Velocidade:</b> {v.speed_kmh ?? ""}<br />
-              <b>Última atualização:</b> {v.last_update_ts ?? ""}
-            </Popup>
-          </Marker>
-        );
-      })}
+            <BaseLayer checked name="Mapa claro">
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                attribution="&copy; OpenStreetMap & CARTO"
+              />
+            </BaseLayer>
 
-    </MapContainer>
+            <BaseLayer name="Mapa escuro">
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                attribution="&copy; OpenStreetMap & CARTO"
+              />
+            </BaseLayer>
+
+            <BaseLayer name="Satélite">
+              <TileLayer
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                attribution="Tiles © Esri"
+              />
+            </BaseLayer>
+
+          </LayersControl>
+
+          {layers.subtrechos && subtrechos.map(st => (
+            <Polyline
+              key={st.subtrecho_id}
+              positions={st.coords}
+              pathOptions={{
+                color: speedColor(st.speed_kmh),
+                weight: 6,
+                opacity: 0.9
+              }}
+            />
+          ))}
+
+          {layers.vehicles && vehicles.map(v => {
+            if (!v.lat || !v.lon) return null;
+            return (
+              <Marker
+                key={v.vehicle_id}
+                position={[v.lat, v.lon]}
+                icon={circleIcon(speedColor(v.speed_kmh))}
+              />
+            );
+          })}
+        </MapContainer>
+      </div>
+
+      <Legend />
+    </>
   );
 }
