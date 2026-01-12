@@ -11,6 +11,8 @@ from app.services.stop_times_lookup import get_stop_times_for_trip
 router = APIRouter(prefix="/debug", tags=["debug"])
 
 
+# ====================== STATE ======================
+
 @router.get("/state")
 def state_summary():
     return {
@@ -21,10 +23,12 @@ def state_summary():
         "shapes": len(rt.shapes or {}),
         "vehicles": len(rt.vehicles or {}),
         "route_shapes": len(rt.route_shapes or {}),
+        "subtrechos": len(getattr(rt, "subtrechos", [])),
+        "subtrecho_stats": len(getattr(rt, "subtrecho_stats", {})),
     }
 
 
-# ---------------- VEHICLES ---------------- #
+# ====================== VEHICLES ======================
 
 @router.get("/sample/vehicle")
 def sample_vehicle():
@@ -65,7 +69,7 @@ def debug_vehicle_progress(vehicle_id: str):
     }
 
 
-# ---------------- SHAPES ---------------- #
+# ====================== SHAPES ======================
 
 @router.get("/shapes/sample")
 def shapes_sample():
@@ -83,7 +87,7 @@ def shapes_sample():
     }
 
 
-# ---------------- STOP TIMES ---------------- #
+# ====================== STOP TIMES ======================
 
 @router.get("/trip/stop_times/{trip_id}")
 def debug_trip_stop_times(trip_id: str):
@@ -105,7 +109,7 @@ def debug_trip_stop_times(trip_id: str):
     }
 
 
-# ---------------- ROUTE → SHAPES ---------------- #
+# ====================== ROUTE → SHAPES ======================
 
 @router.get("/route/{route_id}/shapes/{direction_id}")
 def debug_route_shapes(route_id: str, direction_id: int):
@@ -131,7 +135,7 @@ def debug_route_shapes(route_id: str, direction_id: int):
     }
 
 
-# ---------------- ROUTE_SHAPES INDEX ---------------- #
+# ====================== ROUTE_SHAPES INDEX ======================
 
 @router.get("/route_shapes")
 def debug_route_shapes_index():
@@ -160,13 +164,12 @@ def debug_route_shapes_sample():
     }
 
 
-# ---------------- SUBTRECHOS LIST ---------------- #
+# ====================== SUBTRECHOS ======================
 
 @router.get("/subtrechos")
 def debug_subtrechos(limit: int = 100):
     """
     Lista os subtrechos carregados em memória.
-    limit = número máximo de itens retornados
     """
 
     data = []
@@ -188,7 +191,7 @@ def debug_subtrechos(limit: int = 100):
     }
 
 
-# ---------------- SUBTRECHOS TIMES ---------------- #
+# ====================== SUBTRECHOS TIMES ======================
 
 @router.get("/subtrechos/times")
 def debug_subtrechos_times():
@@ -208,7 +211,7 @@ def debug_subtrechos_times():
     return out
 
 
-# ---------------- SUBTRECHOS STATS ---------------- #
+# ====================== SUBTRECHOS STATS ======================
 
 @router.get("/subtrechos/stats")
 def debug_subtrechos_stats():
@@ -226,3 +229,25 @@ def debug_subtrechos_stats():
         out[k] = stats
 
     return out
+
+
+# ====================== SUBTRECHOS CONSISTÊNCIA ======================
+
+@router.get("/subtrechos/consistency")
+def debug_subtrechos_consistency():
+    """
+    Verifica se as chaves de subtrechos e stats batem.
+    """
+
+    subtrechos = [(st.s1, st.s2) for st in getattr(rt, "subtrechos", [])]
+    stats_keys = list(getattr(rt, "subtrecho_stats", {}).keys())
+
+    return {
+        "subtrechos_count": len(subtrechos),
+        "stats_count": len(stats_keys),
+        "subtrechos_sample": subtrechos[:10],
+        "stats_keys_sample": stats_keys[:10],
+        "intersection_sample": list(
+            set(subtrechos) & set(stats_keys)
+        )[:10],
+    }

@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import asyncio
-import time
 
 from geopy.distance import geodesic
 
@@ -17,15 +16,18 @@ from app.services.vehicles import update_vehicles
 from app.api.debug import router as debug_router
 from app.services.subtrecho_persistence import persist_subtrechos_loop
 
-from gtfs_core.pipeline_trechos import construir_todos_os_subtrechos
-from app.services.realtime_subtrechos import build_subtrecho_index
+# ===== PIPELINES =====
+from app.services.subtrechos_all_builder import build_all_subtrechos
 from app.services.shape_stop_sequence import build_shape_stop_sequence
 
+# ===== MAPA =====
 from app.api.map import router as map_router
 from app.api.map_shapes import router as map_shapes_router
 from app.api.map_routes import router as map_routes_router
 from app.api.map_subtrechos_stop import router as map_subtrechos_stop_router
 from app.api.map_subtrechos_shape import router as map_subtrechos_shape_router
+from app.api.map_subtrechos_all_speed import router as map_subtrechos_all_speed_router
+from app.api.map_subtrechos_pairs import router as map_subtrechos_pairs_router
 
 
 app = FastAPI(
@@ -42,15 +44,22 @@ app.add_middleware(
 )
 
 
+# =========================================================
+# LOOP DE VEÍCULOS
+# =========================================================
+
 async def vehicles_loop():
     while True:
         try:
             update_vehicles()
         except Exception as e:
             print("⚠ vehicle loop error:", e)
-
         await asyncio.sleep(10)
 
+
+# =========================================================
+# STARTUP
+# =========================================================
 
 @app.on_event("startup")
 def startup():
@@ -60,7 +69,7 @@ def startup():
     # 1 — GTFS
     ensure_gtfs_static()
 
-    # 2 — SHAPES (NORMALIZADO)
+    # 2 — SHAPES
     print("⏳ carregando shapes ...")
     raw_shapes = load_shapes()
 
@@ -69,7 +78,6 @@ def startup():
         acc = 0.0
         out = []
         prev = None
-
         for p in pts:
             lat = float(p["lat"])
             lon = float(p["lon"])
@@ -77,7 +85,6 @@ def startup():
                 acc += geodesic(prev, (lat, lon)).meters
             out.append((lat, lon, acc))
             prev = (lat, lon)
-
         norm_shapes[shape_id] = out
 
     rt.shapes = norm_shapes
@@ -88,17 +95,13 @@ def startup():
     rt.stop_times = load_stop_times()
     print(f"✔ stop_times carregados: {len(rt.stop_times)} trips")
 
-    # 4 — STOPS (🔥 NORMALIZAÇÃO CRÍTICA 🔥)
+    # 4 — STOPS
     print("⏳ carregando stops ...")
     raw_stops = load_stops()
-
-    norm_stops = {}
-    for stop_id, s in raw_stops.items():
-        lat = float(s["stop_lat"])
-        lon = float(s["stop_lon"])
-        norm_stops[stop_id] = (lat, lon)
-
-    rt.stops = norm_stops
+    rt.stops = {
+        sid: (float(s["stop_lat"]), float(s["stop_lon"]))
+        for sid, s in raw_stops.items()
+    }
     print(f"✔ stops normalizados: {len(rt.stops)}")
 
     # 5 — ROUTES
@@ -115,29 +118,30 @@ def startup():
     rt.route_shapes = build_route_shape_index(rt.trips)
     print(f"✔ route_shapes criado: {len(rt.route_shapes)} combinações")
 
-    # 7.1 — SHAPE → STOP_SEQUENCE
+    # 8 — SHAPE → STOP_SEQUENCE
     print("⏳ construindo shape_stop_sequence ...")
     build_shape_stop_sequence()
     print(f"✔ shape_stop_sequence criado: {len(rt.shape_stop_sequence)} shapes")
 
-    # 7.2 — SUBTRECHOS
-    print("⏳ construindo subtrechos (pipeline GTFS)...")
-    try:
-        rt.subtrechos = construir_todos_os_subtrechos()
-        print(f"✔ subtrechos gerados: {len(rt.subtrechos)}")
-        build_subtrecho_index()
-    except Exception as e:
-        print(f"⚠️ Falha ao gerar subtrechos: {e}")
-        rt.subtrechos = []
+    # 9 — SUBTRECHOS ALL (BASE ÚNICA)
+    print("⏳ construindo subtrechos ALL (base única)...")
+    rt.subtrechos_all = build_all_subtrechos()
+    print(f"✔ subtrechos ALL carregados: {len(rt.subtrechos_all)}")
 
+    # 10 — PRIMEIRA CARGA DE VEÍCULOS
     update_vehicles()
 
     print("Startup complete")
-    print(f"Subtrechos: {len(rt.subtrechos)}")
+    print(f"Subtrechos ALL: {len(rt.subtrechos_all)}")
+    print(f"Vehicles: {len(rt.vehicles)}")
 
     asyncio.create_task(persist_subtrechos_loop())
     asyncio.create_task(vehicles_loop())
 
+
+# =========================================================
+# ROUTERS
+# =========================================================
 
 app.include_router(debug_router)
 app.include_router(map_router)
@@ -145,13 +149,23 @@ app.include_router(map_shapes_router)
 app.include_router(map_routes_router)
 app.include_router(map_subtrechos_stop_router)
 app.include_router(map_subtrechos_shape_router)
+app.include_router(map_subtrechos_all_speed_router)
+app.include_router(map_subtrechos_pairs_router)
 
+
+# =========================================================
+# ROOT / HEALTH
+# =========================================================
 
 @app.get("/")
 def root():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "gtfs-live-backend"}
 
 
 @app.get("/health", response_class=JSONResponse)
 def health():
-    return {"status": "ok", "vehicles": len(rt.vehicles)}
+    return {
+        "status": "ok",
+        "vehicles": len(rt.vehicles),
+        "subtrechos_all": len(rt.subtrechos_all),
+    }

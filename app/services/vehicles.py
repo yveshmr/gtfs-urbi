@@ -2,15 +2,19 @@ import time
 import httpx
 from collections import defaultdict
 
+from google.transit import gtfs_realtime_pb2
+
 from app.core.state import rt
 from app.core.config import URL_VEHICLE_POSITIONS
-from google.transit import gtfs_realtime_pb2
-from geopy.distance import geodesic
 
 
-AVG_WINDOW_SEC = 900      # 15 minutos
-MIN_GAP_SEC = 3           # mínimo entre travessias
+AVG_WINDOW_SEC = 900   # 15 minutos
+MIN_GAP_SEC = 3        # mínimo entre medições
 
+
+# =====================================================
+# UTIL
+# =====================================================
 
 def parse_speed(speed_raw):
     try:
@@ -21,64 +25,20 @@ def parse_speed(speed_raw):
         return None
 
 
-def prune_old_measurements(now_ts: int):
+def prune_old_measurements(store: dict, now_ts: int):
     cutoff = now_ts - AVG_WINDOW_SEC
 
-    store = getattr(rt, "subtrecho_times", None)
-    if not store:
-        return
-
     for key, lst in list(store.items()):
-        new_lst = [m for m in lst if m["end_ts"] >= cutoff]
-        if new_lst:
-            store[key] = new_lst
+        lst = [m for m in lst if m["end_ts"] >= cutoff]
+        if lst:
+            store[key] = lst
         else:
             store.pop(key, None)
 
 
-def _iter_shape_points(shape_pts):
-    """
-    Normaliza shape points para (lat, lon, m).
-
-    Aceita:
-      - dict: {lat, lon, seq}  (sem metragem)
-      - tuple: (lat, lon, m)
-    """
-    acc = 0.0
-    prev = None
-
-    for p in shape_pts:
-
-        if isinstance(p, dict):
-            lat = float(p["lat"])
-            lon = float(p["lon"])
-
-            if prev:
-                acc += geodesic(prev, (lat, lon)).meters
-
-            yield lat, lon, acc
-            prev = (lat, lon)
-
-        else:
-            # assume (lat, lon, m)
-            yield p
-
-
-def measure_along_shape(shape_pts, lat, lon):
-    """
-    Retorna a metragem acumulada no ponto mais próximo do shape
-    """
-    best = None
-    best_m = None
-
-    for la, lo, m in _iter_shape_points(shape_pts):
-        d = geodesic((la, lo), (lat, lon)).meters
-        if best is None or d < best:
-            best = d
-            best_m = m
-
-    return best_m
-
+# =====================================================
+# UPDATE VEHICLES
+# =====================================================
 
 def update_vehicles():
 
@@ -95,16 +55,20 @@ def update_vehicles():
     now = int(time.time())
     vehicles = {}
 
+    # ================= RUNTIME STATE =================
+
     if not hasattr(rt, "vehicle_last_stop"):
         rt.vehicle_last_stop = {}
 
-    if not hasattr(rt, "subtrecho_times"):
-        rt.subtrecho_times = defaultdict(list)
+    if not hasattr(rt, "subtrecho_all_times"):
+        rt.subtrecho_all_times = defaultdict(list)
 
-    if not hasattr(rt, "subtrecho_stats"):
-        rt.subtrecho_stats = {}
+    if not hasattr(rt, "subtrecho_all_stats"):
+        rt.subtrecho_all_stats = {}
 
-    prune_old_measurements(now)
+    prune_old_measurements(rt.subtrecho_all_times, now)
+
+    # ================= LOOP GTFS-RT =================
 
     for entity in feed.entity:
 
@@ -131,44 +95,79 @@ def update_vehicles():
 
         ts = veh.timestamp or now
 
-        lat = pos.latitude if pos.HasField("latitude") else None
-        lon = pos.longitude if pos.HasField("longitude") else None
+        # ================= SHAPE RESOLUTION =================
+
+        shape_id = None
+        if route_id and direction_id is not None:
+            shape_id = rt.route_shapes.get(f"{route_id}_{direction_id}")
 
         v = {
             "vehicle_id": vehicle_id,
             "vehicle_label": desc.label or None,
-            "lat": lat,
-            "lon": lon,
+            "lat": pos.latitude if pos.HasField("latitude") else None,
+            "lon": pos.longitude if pos.HasField("longitude") else None,
             "speed_kmh": parse_speed(pos.speed if pos.HasField("speed") else None),
             "event_ts": ts,
             "route_id": route_id,
             "direction_id": direction_id,
             "stop_id": stop_id,
-            "shape_id": None,
-            "shape_pos_m": None,
-            "progress": None,
+            "shape_id": shape_id,
             "status": "on_route" if route_id else "off_route",
         }
 
-        if route_id and direction_id is not None and lat is not None and lon is not None:
+        # =====================================================
+        # VELOCIDADE POR SUBTRECHO (ALL — GLOBAL)
+        # =====================================================
 
-            key = f"{route_id}_{direction_id}"
-            shape_id = rt.route_shapes.get(key)
+        if stop_id and shape_id and shape_id in rt.shape_stop_sequence:
 
-            if shape_id and shape_id in rt.shapes:
+            seq_map = rt.shape_stop_sequence[shape_id]
 
-                shape_pts = rt.shapes[shape_id]
-                shape_pos_m = measure_along_shape(shape_pts, lat, lon)
+            if stop_id in seq_map:
 
-                total_m = None
-                for _, _, m in _iter_shape_points(shape_pts):
-                    total_m = m
+                cur_seq = seq_map[stop_id]
+                prev = rt.vehicle_last_stop.get(vehicle_id)
 
-                v["shape_id"] = shape_id
-                v["shape_pos_m"] = shape_pos_m
+                # --- SOMENTE A -> B CONSECUTIVO ---
+                if (
+                    prev
+                    and prev["shape_id"] == shape_id
+                    and cur_seq == prev["stop_seq"] + 1
+                ):
+                    sA = prev["stop_id"]
+                    sB = stop_id
+                    dt = ts - prev["ts"]
 
-                if total_m and shape_pos_m is not None:
-                    v["progress"] = round(shape_pos_m / total_m, 4)
+                    if dt >= MIN_GAP_SEC:
+
+                        key = (sA, sB)
+                        st = rt.subtrechos_all.get(key)
+
+                        if st:
+                            # distância vem do pipeline (shape mais curto)
+                            speed_kmh = (st.distance_m / dt) * 3.6
+
+                            rt.subtrecho_all_times[key].append({
+                                "speed_kmh": speed_kmh,
+                                "end_ts": ts,
+                            })
+
+                            vals = rt.subtrecho_all_times[key]
+                            avg = sum(m["speed_kmh"] for m in vals) / len(vals)
+
+                            rt.subtrecho_all_stats[key] = {
+                                "speed_avg_kmh": round(avg, 1),
+                                "n": len(vals),
+                                "last_ts": ts,
+                            }
+
+                # --- ATUALIZA ESTADO DO VEÍCULO ---
+                rt.vehicle_last_stop[vehicle_id] = {
+                    "shape_id": shape_id,
+                    "stop_id": stop_id,
+                    "stop_seq": cur_seq,
+                    "ts": ts,
+                }
 
         vehicles[vehicle_id] = v
 

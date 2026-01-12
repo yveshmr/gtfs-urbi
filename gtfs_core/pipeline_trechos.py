@@ -1,195 +1,145 @@
 # -*- coding: utf-8 -*-
 
 from dataclasses import dataclass
-from typing import List, Tuple
-
-from geopy.distance import geodesic
+from typing import Dict, List, Tuple
 
 from app.core.state import rt
-from gtfs_core.pairs import PAIRS
 
+
+# ================================
+# MODELO
+# ================================
 
 @dataclass
 class Subtrecho:
     s1: str
     s2: str
     distance_m: float
-    group: str
-    source: str
     polyline: List[Tuple[float, float]]
-    m1: float = 0.0
-    m2: float = 0.0
-    shape_id: str = ""
 
 
-# ======================================================
-# HELPERS (SEM UNPACK IMPLÍCITO)
-# ======================================================
-def measure_along_shape(shape_pts, lat, lon):
-    best_d = None
-    best_m = None
+# ================================
+# PIPELINE PRINCIPAL
+# ================================
 
-    for p in shape_pts:
-        la = p[0]
-        lo = p[1]
-        m = p[2]
-
-        d = geodesic((la, lo), (lat, lon)).meters
-        if best_d is None or d < best_d:
-            best_d = d
-            best_m = m
-
-    return best_m
-
-
-# ======================================================
-# PIPELINE
-# ======================================================
 def construir_todos_os_subtrechos() -> List[Subtrecho]:
+    """
+    Constrói TODOS os subtrechos possíveis A->B
+    usando a sequência dos shapes GTFS.
 
-    print("🧠 Pipeline de subtrechos iniciado (GTFS já carregado)")
+    - Apenas pares consecutivos
+    - Se A->B existir em múltiplos shapes, mantém o menor
+    - NÃO usa geodesic (somente m acumulado)
+    """
 
-    if not rt.shapes or not rt.stops or not rt.stop_times or not rt.trips:
-        raise RuntimeError("GTFS não está carregado no runtime")
+    print("🧠 Pipeline ALL — construindo todos os subtrechos possíveis")
 
-    # --------------------------------------------------
-    # stop_id -> shapes
-    # --------------------------------------------------
-    stops_to_shapes = {}
+    if not rt.shapes or not rt.shape_stop_sequence or not rt.stops:
+        raise RuntimeError("GTFS estático não carregado")
 
-    for trip_id, trip in rt.trips.items():
-        shape_id = trip.get("shape_id")
-        if not shape_id:
+    # (s1, s2) -> melhor Subtrecho encontrado
+    best: Dict[Tuple[str, str], Subtrecho] = {}
+
+    total_shapes = len(rt.shape_stop_sequence)
+    processed = 0
+
+    for shape_id, stop_seq in rt.shape_stop_sequence.items():
+        processed += 1
+
+        if shape_id not in rt.shapes:
             continue
 
-        st_list = rt.stop_times.get(trip_id)
-        if not st_list:
+        shape_pts = rt.shapes[shape_id]
+
+        if not shape_pts or len(shape_pts) < 2:
             continue
 
-        for st in st_list:
-            stop_id = st["stop_id"]
-            stops_to_shapes.setdefault(stop_id, set()).add(shape_id)
+        # ---------------- LOG PROGRESSO ----------------
+        if processed % 10 == 0 or processed == total_shapes:
+            pct = (processed / total_shapes) * 100
+            print(f"⏳ Shapes processados: {processed}/{total_shapes} ({pct:.1f}%)")
 
-    subtrechos = []
+        # mapa seq -> stop_id
+        seq_to_stop = {seq: sid for sid, seq in stop_seq.items()}
+        ordered_seqs = sorted(seq_to_stop.keys())
 
-    # --------------------------------------------------
-    # LOOP DOS PARES
-    # --------------------------------------------------
-    for pair in PAIRS:
+        # cache stop_id -> índice no shape
+        stop_index_cache: Dict[str, int] = {}
 
-        s1 = pair[0]
-        s2 = pair[1]
+        for i in range(len(ordered_seqs) - 1):
+            s1 = seq_to_stop[ordered_seqs[i]]
+            s2 = seq_to_stop[ordered_seqs[i + 1]]
 
-        shapes_s1 = stops_to_shapes.get(s1, set())
-        shapes_s2 = stops_to_shapes.get(s2, set())
-        candidate_shapes = shapes_s1 & shapes_s2
-
-        if not candidate_shapes:
-            continue
-
-        lat1, lon1 = rt.stops[s1]
-        lat2, lon2 = rt.stops[s2]
-
-        best = None
-
-        for shape_id in candidate_shapes:
-
-            shape_pts = rt.shapes.get(shape_id)
-            if not shape_pts:
+            if s1 not in rt.stops or s2 not in rt.stops:
                 continue
 
-            trip_ids = [
-                tid for tid, t in rt.trips.items()
-                if t.get("shape_id") == shape_id
-            ]
-            if not trip_ids:
+            # ---------------- INDICES NO SHAPE ----------------
+            i1 = _nearest_shape_index(shape_pts, rt.stops[s1], stop_index_cache, s1)
+            i2 = _nearest_shape_index(shape_pts, rt.stops[s2], stop_index_cache, s2)
+
+            if i1 is None or i2 is None or i1 >= i2:
                 continue
 
-            st_list = rt.stop_times.get(trip_ids[0])
-            if not st_list:
-                continue
+            m1 = shape_pts[i1][2]
+            m2 = shape_pts[i2][2]
 
-            stop_ids = [x["stop_id"] for x in st_list]
-
-            if s1 not in stop_ids or s2 not in stop_ids:
-                continue
-
-            i1 = stop_ids.index(s1)
-            i2 = stop_ids.index(s2)
-            if i2 <= i1:
-                continue
-
-            m1 = measure_along_shape(shape_pts, lat1, lon1)
-            m2 = measure_along_shape(shape_pts, lat2, lon2)
-
-            if m1 is None or m2 is None or m2 <= m1:
+            if m2 <= m1:
                 continue
 
             dist = m2 - m1
 
-            if best is None or dist < best["dist"]:
-                best = {
-                    "shape_id": shape_id,
-                    "shape_pts": shape_pts,
-                    "stop_ids": stop_ids,
-                    "m1": m1,
-                    "m2": m2,
-                    "dist": dist,
-                }
-
-        if not best:
-            continue
-
-        shape_pts = best["shape_pts"]
-        stop_ids = best["stop_ids"]
-
-        i1 = stop_ids.index(s1)
-        i2 = stop_ids.index(s2)
-        janela = stop_ids[i1:i2 + 1]
-
-        measures = {}
-        for sid in janela:
-            lat, lon = rt.stops[sid]
-            measures[sid] = measure_along_shape(shape_pts, lat, lon)
-
-        # --------------------------------------------------
-        # CRIA SUBTRECHOS
-        # --------------------------------------------------
-        for i in range(len(janela) - 1):
-            a = janela[i]
-            b = janela[i + 1]
-
-            ma = measures[a]
-            mb = measures[b]
-
-            if ma is None or mb is None or mb <= ma:
-                continue
-
-            polyline = []
-            for p in shape_pts:
-                lat = p[0]
-                lon = p[1]
-                m = p[2]
-                if ma <= m <= mb:
-                    polyline.append((lat, lon))
+            polyline = [
+                (lat, lon)
+                for (lat, lon, _) in shape_pts[i1:i2 + 1]
+            ]
 
             if len(polyline) < 2:
                 continue
 
-            subtrechos.append(
-                Subtrecho(
-                    s1=a,
-                    s2=b,
-                    distance_m=mb - ma,
-                    group=f"{a}->{b}",
-                    source="shape",
-                    polyline=polyline,
-                    m1=ma,
-                    m2=mb,
-                    shape_id=best["shape_id"],
+            key = (s1, s2)
+
+            if key not in best or dist < best[key].distance_m:
+                best[key] = Subtrecho(
+                    s1=s1,
+                    s2=s2,
+                    distance_m=dist,
+                    polyline=polyline
                 )
-            )
 
-    print(f"🏁 Pipeline gerou {len(subtrechos)} subtrechos")
+    print(f"✔ Pipeline ALL finalizado: {len(best)} subtrechos")
+    return list(best.values())
 
-    return subtrechos
+
+# ================================
+# UTIL — ÍNDICE MAIS PRÓXIMO
+# ================================
+
+def _nearest_shape_index(
+    shape_pts: List[Tuple[float, float, float]],
+    stop_xy: Tuple[float, float],
+    cache: Dict[str, int],
+    stop_id: str
+) -> int | None:
+    """
+    Retorna o índice do ponto do shape mais próximo do stop.
+    Usa cache para evitar recomputar.
+    """
+
+    if stop_id in cache:
+        return cache[stop_id]
+
+    lat, lon = stop_xy
+
+    best_i = None
+    best_d = None
+
+    for i, (la, lo, _) in enumerate(shape_pts):
+        d = (la - lat) ** 2 + (lo - lon) ** 2  # distância quadrada (rápida)
+        if best_d is None or d < best_d:
+            best_d = d
+            best_i = i
+
+    if best_i is not None:
+        cache[stop_id] = best_i
+
+    return best_i

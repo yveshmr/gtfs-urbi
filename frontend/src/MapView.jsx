@@ -14,9 +14,8 @@ import "leaflet/dist/leaflet.css";
 const { BaseLayer } = LayersControl;
 const API = "http://127.0.0.1:8000";
 
-//
+
 // ================= ICON =================
-//
 const circleIcon = (color = "#999") =>
   L.divIcon({
     html: `
@@ -30,9 +29,8 @@ const circleIcon = (color = "#999") =>
     iconAnchor: [8, 8],
   });
 
-//
+
 // ============ COLOR SCALE ============
-//
 function speedColor(v) {
   if (v == null) return "#cccccc";
   if (v < 10) return "#800080";
@@ -42,9 +40,8 @@ function speedColor(v) {
   return "#00aa00";
 }
 
-//
+
 // ============ LEGEND ============
-//
 function Legend() {
   const items = [
     { label: "< 10 km/h", color: "#800080" },
@@ -66,7 +63,7 @@ function Legend() {
       fontSize: 12,
       zIndex: 1500
     }}>
-      <b>Velocidade</b>
+      <b>Velocidade média (15 min)</b>
       {items.map(i => (
         <div key={i.label} style={{ display: "flex", alignItems: "center" }}>
           <div style={{
@@ -83,19 +80,25 @@ function Legend() {
   );
 }
 
+
+// ================= MAP =================
 export default function MapView() {
 
   const [vehicles, setVehicles] = useState([]);
   const [subtrechos, setSubtrechos] = useState([]);
+  const [subtrechosAll, setSubtrechosAll] = useState([]);
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [clock, setClock] = useState("");
 
   const [layers, setLayers] = useState({
     vehicles: true,
     subtrechos: false,
+    subtrechosAll: false,
   });
 
-  // ===== relógio =====
+
+  // ===== RELÓGIO =====
   useEffect(() => {
     const t = setInterval(() => {
       setClock(new Date().toLocaleTimeString());
@@ -103,7 +106,8 @@ export default function MapView() {
     return () => clearInterval(t);
   }, []);
 
-  // ===== veículos =====
+
+  // ===== VEÍCULOS =====
   useEffect(() => {
     function load() {
       fetch(`${API}/map/vehicles`)
@@ -116,14 +120,30 @@ export default function MapView() {
     return () => clearInterval(id);
   }, []);
 
-  // ===== subtrechos =====
+
+  // ===== SUBTRECHOS SELECIONADOS (PAIRS) =====
   useEffect(() => {
     if (!layers.subtrechos) return;
-    fetch(`${API}/map/subtrechos/shape`)
+
+    // 🔥 ÚNICA ALTERAÇÃO AQUI
+    fetch(`${API}/map/subtrechos/pairs`)
       .then(r => r.json())
       .then(setSubtrechos)
       .catch(console.error);
+
   }, [layers.subtrechos]);
+
+
+  // ===== SUBTRECHOS ALL =====
+  useEffect(() => {
+    if (!layers.subtrechosAll) return;
+
+    fetch(`${API}/map/subtrechos/all`)
+      .then(r => r.json())
+      .then(setSubtrechosAll)
+      .catch(console.error);
+  }, [layers.subtrechosAll]);
+
 
   return (
     <>
@@ -149,13 +169,14 @@ export default function MapView() {
         </div>
 
         <div style={{ fontWeight: "bold", flex: 1 }}>
-          URBI • Monitoramento
+          URBI • Monitoramento Operacional
         </div>
 
         <div style={{ fontFamily: "monospace" }}>
           {clock}
         </div>
       </div>
+
 
       {/* ================= DRAWER ================= */}
       <div style={{
@@ -180,10 +201,10 @@ export default function MapView() {
             onChange={() =>
               setLayers(l => ({ ...l, vehicles: !l.vehicles }))
             }
-          /> Velocidade dos veículos
+          /> Veículos
         </label>
 
-        <br />
+        <br /><br />
 
         <label>
           <input
@@ -192,9 +213,22 @@ export default function MapView() {
             onChange={() =>
               setLayers(l => ({ ...l, subtrechos: !l.subtrechos }))
             }
-          /> Velocidade dos trechos (shape)
+          /> Subtrechos selecionados (pairs)
+        </label>
+
+        <br /><br />
+
+        <label>
+          <input
+            type="checkbox"
+            checked={layers.subtrechosAll}
+            onChange={() =>
+              setLayers(l => ({ ...l, subtrechosAll: !l.subtrechosAll }))
+            }
+          /> Velocidade global (todos os pares)
         </label>
       </div>
+
 
       {/* ================= MAP ================= */}
       <div style={{
@@ -212,9 +246,7 @@ export default function MapView() {
         >
           <ZoomControl position="bottomright" />
 
-          {/* 🔽 ÚNICA PARTE ALTERADA 🔽 */}
           <LayersControl position="topright">
-
             <BaseLayer checked name="Mapa claro">
               <TileLayer
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -228,28 +260,54 @@ export default function MapView() {
                 attribution="&copy; OpenStreetMap & CARTO"
               />
             </BaseLayer>
-
-            <BaseLayer name="Satélite">
-              <TileLayer
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                attribution="Tiles © Esri"
-              />
-            </BaseLayer>
-
           </LayersControl>
 
+
+          {/* ===== SUBTRECHOS PAIRS ===== */}
           {layers.subtrechos && subtrechos.map(st => (
             <Polyline
-              key={st.subtrecho_id}
+              key={`pairs-${st.subtrecho_id}`}
               positions={st.coords}
               pathOptions={{
                 color: speedColor(st.speed_kmh),
                 weight: 6,
                 opacity: 0.9
               }}
-            />
+            >
+              <Popup>
+                <b>Trecho:</b> {st.subtrecho_id}<br />
+                <b>Velocidade:</b> {st.speed_kmh} km/h<br />
+                <b>Amostras:</b> {st.n}<br />
+                <b>Última:</b>{" "}
+                {new Date(st.last_ts * 1000).toLocaleTimeString()}
+              </Popup>
+            </Polyline>
           ))}
 
+
+          {/* ===== SUBTRECHOS ALL ===== */}
+          {layers.subtrechosAll && subtrechosAll.map(st => (
+            <Polyline
+              key={`all-${st.subtrecho_id}`}
+              positions={st.coords}
+              pathOptions={{
+                color: speedColor(st.speed_kmh),
+                weight: Math.min(8, 2 + Math.log(st.n + 1) * 2),
+                opacity: 0.6
+              }}
+            >
+              <Popup>
+                <b>Trecho:</b> {st.subtrecho_id}<br />
+                <b>Velocidade média:</b> {st.speed_kmh} km/h<br />
+                <b>Amostras:</b> {st.n}<br />
+                <b>Última atualização:</b>{" "}
+                {new Date(st.last_ts * 1000).toLocaleTimeString()}
+              </Popup>
+            </Polyline>
+          ))}
+
+
+          {/* ===== VEÍCULOS ===== */}
           {layers.vehicles && vehicles.map(v => {
             if (!v.lat || !v.lon) return null;
             return (
@@ -257,9 +315,15 @@ export default function MapView() {
                 key={v.vehicle_id}
                 position={[v.lat, v.lon]}
                 icon={circleIcon(speedColor(v.speed_kmh))}
-              />
+              >
+                <Popup>
+                  <b>Veículo:</b> {v.vehicle_label || v.vehicle_id}<br />
+                  <b>Velocidade:</b> {v.speed_kmh ?? "-"} km/h
+                </Popup>
+              </Marker>
             );
           })}
+
         </MapContainer>
       </div>
 
