@@ -19,6 +19,7 @@ from app.services.subtrecho_persistence import persist_subtrechos_loop
 # ===== PIPELINES =====
 from app.services.subtrechos_all_builder import build_all_subtrechos
 from app.services.shape_stop_sequence import build_shape_stop_sequence
+from app.services.historical_subtrechos_builder import build_historical_subtrechos
 
 # ===== MAPA =====
 from app.api.map import router as map_router
@@ -28,6 +29,9 @@ from app.api.map_subtrechos_stop import router as map_subtrechos_stop_router
 from app.api.map_subtrechos_shape import router as map_subtrechos_shape_router
 from app.api.map_subtrechos_all_speed import router as map_subtrechos_all_speed_router
 from app.api.map_subtrechos_pairs import router as map_subtrechos_pairs_router
+from app.api.map_subtrechos_comparison import (
+    router as map_subtrechos_comparison_router
+)
 
 
 app = FastAPI(
@@ -123,16 +127,22 @@ def startup():
     build_shape_stop_sequence()
     print(f"✔ shape_stop_sequence criado: {len(rt.shape_stop_sequence)} shapes")
 
-    # 9 — SUBTRECHOS ALL (BASE ÚNICA)
+    # 9 — SUBTRECHOS ALL (BASE CANÔNICA)
     print("⏳ construindo subtrechos ALL (base única)...")
     rt.subtrechos_all = build_all_subtrechos()
     print(f"✔ subtrechos ALL carregados: {len(rt.subtrechos_all)}")
 
-    # 10 — PRIMEIRA CARGA DE VEÍCULOS
+    # 10 — HISTÓRICO (COMPARAÇÃO)
+    print("⏳ construindo base histórica de subtrechos...")
+    build_historical_subtrechos()
+    print(f"✔ histórico carregado: {len(rt.historical_subtrechos)} chaves")
+
+    # 11 — PRIMEIRA CARGA DE VEÍCULOS
     update_vehicles()
 
     print("Startup complete")
     print(f"Subtrechos ALL: {len(rt.subtrechos_all)}")
+    print(f"Histórico: {len(rt.historical_subtrechos)}")
     print(f"Vehicles: {len(rt.vehicles)}")
 
     asyncio.create_task(persist_subtrechos_loop())
@@ -151,6 +161,7 @@ app.include_router(map_subtrechos_stop_router)
 app.include_router(map_subtrechos_shape_router)
 app.include_router(map_subtrechos_all_speed_router)
 app.include_router(map_subtrechos_pairs_router)
+app.include_router(map_subtrechos_comparison_router)
 
 
 # =========================================================
@@ -168,4 +179,7 @@ def health():
         "status": "ok",
         "vehicles": len(rt.vehicles),
         "subtrechos_all": len(rt.subtrechos_all),
+        "historical_subtrechos": len(
+            getattr(rt, "historical_subtrechos", {})
+        ),
     }

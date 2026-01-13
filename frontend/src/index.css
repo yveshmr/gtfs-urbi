@@ -2,16 +2,27 @@ html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
+
+  /* Fonte global do projeto */
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 /* Corrige layout — remove estilos padrão do Vite */
 body {
   display: block;
   background: #ffffff;
+
+  /* reforça fonte no body também */
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 /* Garante que o mapa ocupe a tela toda */
 .leaflet-container {
   height: 100%;
   width: 100%;
+}
+
+/* Leaflet popups também seguirem a tipografia */
+.leaflet-popup-content {
+  font-family: Arial, Helvetica, sans-serif;
 }

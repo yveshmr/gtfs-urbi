@@ -24,7 +24,7 @@ def list_subtrechos_pairs() -> List[Dict]:
         - retorna apenas os que possuem estatística
     """
 
-    out = []
+    out: List[Dict] = []
 
     if not hasattr(rt, "subtrechos_all"):
         return out
@@ -68,14 +68,14 @@ def list_subtrechos_pairs() -> List[Dict]:
                 sA = seq_to_stop[ordered[i]]
                 sB = seq_to_stop[ordered[i + 1]]
 
-                key = (sA, sB)
+                key = (str(sA), str(sB))
                 st = rt.subtrechos_all.get(key)
 
                 if not st:
                     valid = False
                     break
 
-                dist += st.distance_m
+                dist += float(st.distance_m)
 
             if not valid:
                 continue
@@ -98,25 +98,48 @@ def list_subtrechos_pairs() -> List[Dict]:
         seq_to_stop = best["seq_to_stop"]
 
         for i in range(len(ordered) - 1):
-            sA = seq_to_stop[ordered[i]]
-            sB = seq_to_stop[ordered[i + 1]]
+            sA = str(seq_to_stop[ordered[i]])
+            sB = str(seq_to_stop[ordered[i + 1]])
 
             key = (sA, sB)
 
             stats = rt.subtrecho_all_stats.get(key)
             st = rt.subtrechos_all.get(key)
 
-            if not stats or not st or not st.polyline or len(st.polyline) < 2:
+            if not stats or not st:
+                continue
+
+            if not st.polyline or len(st.polyline) < 2:
+                continue
+
+            # ✅ evita KeyError e ignora stats incompletos
+            speed_avg = stats.get("speed_avg_kmh")
+            if speed_avg is None:
                 continue
 
             out.append({
                 "pair_id": f"{A1}->{A2}",
                 "subtrecho_id": f"{sA}->{sB}",
                 "coords": [[lat, lon] for (lat, lon) in st.polyline],
-                "speed_kmh": stats["speed_avg_kmh"],
-                "n": stats["n"],
-                "last_ts": stats["last_ts"],
-                "model": "pairs"
+
+                # velocidade média (janela)
+                "speed_kmh": speed_avg,
+
+                # metadados
+                "n": stats.get("n", 0),
+                "last_ts": stats.get("last_ts"),
+                "model": "pairs",
+
+                # distância do trecho (do ALL)
+                "distance_m": round(float(st.distance_m), 1),
+
+                # ============================
+                # CAMPOS PARA DEBUG DO CÁLCULO
+                # ============================
+                "dt_sec": stats.get("dt_sec"),
+                "t0_ts": stats.get("t0_ts"),
+                "t1_ts": stats.get("t1_ts"),
+                "speed_last_kmh": stats.get("speed_last_kmh"),
             })
 
     return out

@@ -45,13 +45,35 @@ def list_all_subtrechos_with_speed() -> List[Dict]:
         out.append({
             "subtrecho_id": f"{s1}->{s2}",
             "coords": [[lat, lon] for (lat, lon) in st.polyline],
-            "speed_kmh": stat["speed_avg_kmh"],
+
+            # velocidade média do período (janela)
+            "speed_kmh": stat.get("speed_avg_kmh"),
+
+            # metadados
             "n": stat.get("n", 0),
             "last_ts": stat.get("last_ts"),
             "model": "all",
             "from_stop": s1,
             "to_stop": s2,
+
+            # distância do trecho (do ALL)
             "distance_m": round(st.distance_m, 1),
+
+            # ============================
+            # CAMPOS PARA DEBUG DO CÁLCULO
+            # ============================
+            # dt usado na última medição que entrou na janela
+            "dt_sec": stat.get("dt_sec"),
+
+            # timestamps da última medição (entrada/saída)
+            "t0_ts": stat.get("t0_ts"),
+            "t1_ts": stat.get("t1_ts"),
+
+            # velocidade instantânea da última medição
+            "speed_last_kmh": stat.get("speed_last_kmh"),
+
+            # ✅ quando a medição foi descartada (ex: > 70 km/h)
+            "discarded": stat.get("discarded"),
         })
 
     return out

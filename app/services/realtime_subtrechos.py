@@ -1,7 +1,10 @@
 import logging
 from typing import Dict, List, Optional
+from datetime import datetime
+
 from app.core.state import rt
 from gtfs_core.pipeline_trechos import Subtrecho
+from app.services.subtrechos_comparator import compare_realtime_with_historical
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +30,16 @@ def build_subtrecho_index():
 
 def find_subtrecho_for_position(
     shape_id: str,
-    shape_pos_m: float
+    shape_pos_m: float,
+    *,
+    realtime_speed_kmh: Optional[float] = None,
+    realtime_timestamp_utc: Optional[datetime] = None,
 ) -> Optional[Subtrecho]:
+    """
+    Retorna o subtrecho correspondente à posição no shape.
+    Se velocidade e timestamp forem informados, executa
+    a comparação histórico × realtime e anexa ao subtrecho.
+    """
 
     lst = subtrechos_by_shape.get(shape_id)
     if not lst:
@@ -36,6 +47,31 @@ def find_subtrecho_for_position(
 
     for s in lst:
         if s.m1 <= shape_pos_m < s.m2:
+
+            # --------------------------------------------------
+            # Integração da comparação histórico × realtime
+            # --------------------------------------------------
+            if (
+                realtime_speed_kmh is not None
+                and realtime_timestamp_utc is not None
+            ):
+                try:
+                    comparison = compare_realtime_with_historical(
+                        s1=str(s.s1),
+                        s2=str(s.s2),
+                        realtime_speed_kmh=realtime_speed_kmh,
+                        realtime_timestamp_utc=realtime_timestamp_utc,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Erro ao comparar histórico x realtime "
+                        f"({s.s1}->{s.s2}): {e}"
+                    )
+                    comparison = None
+
+                # anexa dinamicamente (não quebra modelo)
+                s.comparison = comparison
+
             return s
 
     return None
