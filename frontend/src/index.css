@@ -5,6 +5,13 @@ html, body, #root {
 
   /* Fonte global do projeto */
   font-family: Arial, Helvetica, sans-serif;
+
+  /* ✅ melhora qualidade/renderização da fonte */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* ✅ evita "texto tremido" em alguns browsers */
+  text-rendering: optimizeLegibility;
 }
 
 /* Corrige layout — remove estilos padrão do Vite */

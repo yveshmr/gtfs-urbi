@@ -144,7 +144,7 @@ function MapClickHandler({ clearSelections }) {
 }
 
 // ================= MAP =================
-export default function MapView() {
+export default function MapView({ setScreen }) {
 
   const [vehicles, setVehicles] = useState([]);
   const [subtrechos, setSubtrechos] = useState([]);
@@ -341,6 +341,50 @@ export default function MapView() {
         zIndex: 1900,
         pointerEvents: menuOpen ? "auto" : "none"
       }}>
+
+        {/* ✅ NAVEGAÇÃO ENTRE TELAS */}
+        <h3>Menu</h3>
+
+        <button
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            marginBottom: 8,
+            borderRadius: 8,
+            border: "1px solid #ddd",
+            background: "#f7f7f7",
+            cursor: "pointer",
+            textAlign: "left"
+          }}
+          onClick={() => {
+            setMenuOpen(false);
+            setScreen("camadas");
+          }}
+        >
+          🗺️ Camadas
+        </button>
+
+        <button
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            marginBottom: 14,
+            borderRadius: 8,
+            border: "1px solid #ddd",
+            background: "#ffffff",
+            cursor: "pointer",
+            textAlign: "left"
+          }}
+          onClick={() => {
+            setMenuOpen(false);
+            setScreen("lista");
+          }}
+        >
+          📋 Lista
+        </button>
+
+        <hr style={{ margin: "14px 0" }} />
+
         <h3>Camadas</h3>
 
         {Object.entries({
