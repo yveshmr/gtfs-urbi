@@ -21,7 +21,7 @@ class MapVehicle(BaseModel):
 
     trip_id: Optional[str]
     direction_id: Optional[int]
-
+    stop_id: Optional[str] = None
     lat: Optional[float]
     lon: Optional[float]
 
@@ -38,7 +38,22 @@ class MapVehicle(BaseModel):
     # 👇👇👇 NOVO — heading calculado pelo backend
     heading_deg: Optional[float] = None
 
-
+class MapVehicleTable(MapVehicle):
+    """
+    DTO enviado para o frontend na visão de TABELA.
+    Herdamos tudo do MapVehicle e adicionamos as métricas calculadas.
+    """
+    current_subtrecho_index: Optional[int] = None
+    remaining_subtrechos_count: Optional[int] = None
+    eta_seconds: Optional[int] = None
+    eta_ts_iso: Optional[str] = None
+    eta_sources: Optional[dict] = None
+    origin_stop_name: Optional[str] = None
+    destination_stop_name: Optional[str] = None
+    origin_stop_id: Optional[str] = None
+    destination_stop_id: Optional[str] = None
+    origin_stop_desc: Optional[str] = None
+    destination_stop_desc: Optional[str] = None
 
 def _safe(v: dict, key: str) -> Any:
     return v.get(key)
@@ -88,13 +103,13 @@ def get_active_map_vehicles() -> List[MapVehicle]:
         mv = MapVehicle(
             vehicle_id=_safe(v, "vehicle_id") or _safe(v, "id"),
             vehicle_label=_safe(v, "vehicle_label") or _safe(v, "label"),
-
+    
             route_id=route_id,
             route_short_name=_route_short_name(route),
 
             trip_id=_safe(v, "trip_id"),
             direction_id=_safe(v, "direction_id"),
-
+            stop_id=_safe(v, "stop_id"),
             lat=_safe(v, "lat"),
             lon=_safe(v, "lon"),
 
