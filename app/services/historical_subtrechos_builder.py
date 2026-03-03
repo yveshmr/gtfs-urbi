@@ -57,6 +57,11 @@ def _normalize_timestamp(df: pd.DataFrame) -> pd.Series:
 
     return pd.Series([pd.NaT] * len(df))
 
+def _latest_mtime(paths: list[Path]) -> float:
+    """Retorna o maior mtime entre arquivos, ou 0 se não houver."""
+    if not paths:
+        return 0.0
+    return max(p.stat().st_mtime for p in paths if p.exists())
 
 # ============================
 # Builder principal
@@ -66,24 +71,51 @@ def build_historical_subtrechos():
     today = datetime.utcnow().strftime("%Y-%m-%d")
     cache_file = CACHE_DIR / f"historical_{today}.pkl"
 
-    # --------------------------------------------------
-    # Cache diário
-    # --------------------------------------------------
-    if cache_file.exists():
-        with open(cache_file, "rb") as f:
-            rt.historical_subtrechos = pickle.load(f)
-
-        print(
-            f"[historical] cache carregado: {cache_file.name} | "
-            f"{len(rt.historical_subtrechos)} chaves"
-        )
-        return
-
-    print("[historical] iniciando build histórico (primeira execução do dia)")
-    print(f"[historical] lendo arquivos de: {HIST_SOURCE_DIR}")
+    print(f"[historical] DATA_DIR={DATA_DIR}")
+    print(f"[historical] HIST_SOURCE_DIR={HIST_SOURCE_DIR}")
+    print(f"[historical] CACHE_DIR={CACHE_DIR}")
 
     files = sorted(HIST_SOURCE_DIR.glob("*.csv"))
+    src_latest = _latest_mtime(files)
 
+    # --------------------------------------------------
+    # Cache diário (robusto)
+    # --------------------------------------------------
+    if cache_file.exists():
+        cache_mtime = cache_file.stat().st_mtime
+        try:
+            with open(cache_file, "rb") as f:
+                cached = pickle.load(f)
+
+            cached_len = len(cached) if isinstance(cached, dict) else 0
+
+            print(
+                f"[historical] cache encontrado: {cache_file.name} | "
+                f"{cached_len} chaves | src_files={len(files)}"
+            )
+
+            cache_is_empty = cached_len == 0
+
+            # A) cache vazio + existe fonte => rebuild
+            if cache_is_empty and len(files) > 0:
+                print("[historical][warn] cache vazio, mas há CSVs na fonte -> rebuild")
+
+            # B) fonte mais nova que cache => rebuild
+            elif src_latest > cache_mtime:
+                print("[historical][warn] fonte mais nova que cache -> rebuild")
+
+            else:
+                rt.historical_subtrechos = cached
+                return
+
+        except Exception as e:
+            print(f"[historical][warn] erro ao carregar cache {cache_file.name}: {e}")
+            print("[historical] rebuild devido a falha ao carregar cache")
+
+    # --------------------------------------------------
+    # Build (primeira execução ou rebuild)
+    # --------------------------------------------------
+    print("[historical] iniciando build histórico")
     print(f"[historical] arquivos encontrados: {len(files)}")
 
     acc = {}
@@ -107,7 +139,7 @@ def build_historical_subtrechos():
         df["timestamp_norm"] = _normalize_timestamp(df)
         df = df.dropna(subset=["timestamp_norm"])
 
-        # dias úteis (UTC)
+        # dias úteis (UTC) — mantive como está por enquanto
         df = df[df["timestamp_norm"].dt.weekday < 5]
 
         if df.empty:
@@ -188,10 +220,15 @@ def build_historical_subtrechos():
             "confidence": _confidence(total_weight),
         }
 
+    rt.historical_subtrechos = historical
+
+    # C) não salvar cache vazio
+    if len(historical) == 0:
+        print("[historical][warn] build vazio; NÃO salvando cache para não travar o dia")
+        return
+
     with open(cache_file, "wb") as f:
         pickle.dump(historical, f)
-
-    rt.historical_subtrechos = historical
 
     print(
         f"[historical] build concluído | "
