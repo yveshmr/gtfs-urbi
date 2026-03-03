@@ -8,7 +8,7 @@ from app.core.state import rt
 PERSIST_DIR = Path("data/subtrechos")
 PERSIST_DIR.mkdir(parents=True, exist_ok=True)
 
-WINDOW_SEC = 60  # snapshot a cada 1 minuto
+WINDOW_SEC = 60 *15  # snapshot a cada 15 minutos
 
 
 async def persist_subtrechos_loop():
@@ -27,7 +27,9 @@ def persist_snapshot():
     ts = int(time.time())
     fname = PERSIST_DIR / f"subtrechos_{ts}.csv"
 
-    stats = getattr(rt, "subtrecho_stats", {})
+    # ✅ FIX 3: o runtime atual acumula em rt.subtrecho_all_stats (não em subtrecho_stats)
+    stats = getattr(rt, "subtrecho_all_stats", {})
+    
     if not stats:
         return
 

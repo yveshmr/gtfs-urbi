@@ -54,6 +54,17 @@ class MapVehicleTable(MapVehicle):
     destination_stop_id: Optional[str] = None
     origin_stop_desc: Optional[str] = None
     destination_stop_desc: Optional[str] = None
+        # ===== CITTATI (viagem ativa por veículo/prefixo) =====
+    inicioProgramado: Optional[str] = None
+    inicioRealizado: Optional[str] = None
+    fimProgramado: Optional[str] = None
+
+    nomePontoInicio: Optional[str] = None
+    nomePontoFim: Optional[str] = None
+
+    codAtendimento: Optional[int] = None
+    atividade: Optional[str] = None
+    tabela: Optional[str] = None
 
 def _safe(v: dict, key: str) -> Any:
     return v.get(key)
