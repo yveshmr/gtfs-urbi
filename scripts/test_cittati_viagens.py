@@ -6,8 +6,8 @@ from app.integrations.cittati.viagens import indexar_viagens_por_veiculo_linha_s
 
 def main():
     # 👇 HARD CODED
-    USER = "yves.ribeiro.urbi"
-    PASS = "Rib2023@"
+    USER = ""
+    PASS = ""
 
     client = CittatiClient(USER, PASS)
 
