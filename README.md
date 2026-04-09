@@ -32,11 +32,6 @@ O foco é uma visão de **controle operacional**, e não uma interface para pass
 - [Histórico e cache](#histórico-e-cache)
 - [Integração com Cittati](#integração-com-cittati)
 - [Testes e scripts auxiliares](#testes-e-scripts-auxiliares)
-- [Empacotamento desktop](#empacotamento-desktop)
-- [Boas práticas para publicar no GitHub](#boas-práticas-para-publicar-no-github)
-- [Problemas conhecidos](#problemas-conhecidos)
-- [Próximos passos](#próximos-passos)
-- [Licença](#licença)
 
 ---
 
