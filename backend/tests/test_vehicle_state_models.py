@@ -1,4 +1,4 @@
-from app.models import VehicleCurrentState
+from app.models import VehicleCurrentState, VehicleEtaSnapshot
 
 
 def test_vehicle_current_state_uses_realtime_schema_and_prefix_key() -> None:
@@ -34,3 +34,14 @@ def test_vehicle_current_state_has_bounded_three_sample_window() -> None:
     assert table.c.last_boundary_stop_id.nullable is True
     assert table.c.last_boundary_projection_quality.nullable is True
     assert table.c.last_boundary_crossed_at.nullable is True
+
+
+def test_vehicle_eta_snapshot_overwrites_one_row_per_vehicle() -> None:
+    table = VehicleEtaSnapshot.__table__
+
+    assert table.schema == "realtime"
+    assert [column.name for column in table.primary_key.columns] == ["vehicle_prefix"]
+    assert "payload" in table.c
+    assert {foreign_key.target_fullname for foreign_key in table.foreign_keys} == {
+        "realtime.vehicle_current_states.vehicle_prefix"
+    }

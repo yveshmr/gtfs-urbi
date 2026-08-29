@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.segment_estimate_catalog import load_segment_estimate_catalog
+from app.services.segment_estimate_catalog import (
+    SegmentEstimateCatalog,
+    load_segment_estimate_catalog,
+)
 from app.services.vehicle_eta import (
     EtaProjection,
     EtaScenario,
@@ -39,41 +44,11 @@ class VehicleEtaResult:
     future_time_service: EtaProjection
 
 
-async def query_vehicle_eta(
-    session: AsyncSession,
+def validate_vehicle_eta_state(
+    state: Mapping[str, Any],
     *,
-    vehicle_prefix: str,
     queried_at: datetime,
-) -> VehicleEtaResult:
-    if queried_at.tzinfo is None:
-        raise ValueError("ETA timestamp must include a timezone.")
-
-    state_result = await session.execute(
-        text(
-            """
-            SELECT
-                vehicle.vehicle_prefix,
-                vehicle.source_timestamp,
-                vehicle.feed_id,
-                vehicle.trip_id,
-                vehicle.route_id,
-                trip.direction_id,
-                vehicle.shape_progress_m,
-                vehicle.current_origin_stop_sequence,
-                vehicle.current_destination_stop_sequence
-            FROM realtime.vehicle_current_states AS vehicle
-            LEFT JOIN core.gtfs_trips AS trip
-              ON trip.feed_id = vehicle.feed_id
-             AND trip.trip_id = vehicle.trip_id
-            WHERE vehicle.vehicle_prefix = :vehicle_prefix
-            """
-        ),
-        {"vehicle_prefix": vehicle_prefix},
-    )
-    state_rows = list(state_result.mappings())
-    if not state_rows:
-        raise VehicleNotFoundError(vehicle_prefix)
-    state = state_rows[0]
+) -> None:
     required = (
         "source_timestamp",
         "feed_id",
@@ -91,25 +66,11 @@ async def query_vehicle_eta(
     if queried_at - state["source_timestamp"] > timedelta(minutes=5):
         raise VehicleEtaUnavailableError("Vehicle position is older than five minutes.")
 
-    stops_result = await session.execute(
-        text(
-            """
-            SELECT stop_id, stop_sequence, shape_progress_m,
-                   arrival_seconds, departure_seconds
-            FROM core.gtfs_stop_times
-            WHERE feed_id = :feed_id
-              AND trip_id = :trip_id
-              AND stop_sequence >= :origin_stop_sequence
-            ORDER BY stop_sequence
-            """
-        ),
-        {
-            "feed_id": state["feed_id"],
-            "trip_id": state["trip_id"],
-            "origin_stop_sequence": state["current_origin_stop_sequence"],
-        },
-    )
-    stops = list(stops_result.mappings())
+
+def build_remaining_trip_segments(
+    state: Mapping[str, Any],
+    stops: Sequence[Mapping[str, Any]],
+) -> tuple[RemainingTripSegment, ...]:
     if len(stops) < 2:
         raise VehicleEtaUnavailableError("Trip does not have a remaining stop pair.")
     if (
@@ -154,27 +115,35 @@ async def query_vehicle_eta(
         )
     if not segments:
         raise VehicleEtaUnavailableError("Trip does not have a measurable remaining segment.")
+    return tuple(segments)
 
-    catalog = await load_segment_estimate_catalog(
-        session,
-        segments=tuple(segments),
-        route_id=state["route_id"],
-        direction_id=state["direction_id"],
-        queried_at=queried_at,
-    )
 
+async def compose_vehicle_eta_result(
+    *,
+    state: Mapping[str, Any],
+    stops: Sequence[Mapping[str, Any]],
+    segments: tuple[RemainingTripSegment, ...],
+    catalog: SegmentEstimateCatalog,
+    queried_at: datetime,
+) -> VehicleEtaResult:
     async def resolve_segment(
         segment: RemainingTripSegment,
         estimate_at: datetime,
         scope: EtaScope,
     ):  # type: ignore[no-untyped-def]
-        return catalog.resolve(segment, estimate_at, scope)
+        return catalog.resolve(
+            segment,
+            estimate_at,
+            scope,
+            route_id=state["route_id"],
+            direction_id=state["direction_id"],
+        )
 
     projections: dict[tuple[EtaScenario, EtaScope], EtaProjection] = {}
     for scenario in ("current_time", "future_time"):
         for scope in ("physical", "service"):
             projections[(scenario, scope)] = await compose_eta_projection(
-                segments=tuple(segments),
+                segments=segments,
                 queried_at=queried_at,
                 scope=scope,
                 scenario=scenario,
@@ -193,4 +162,79 @@ async def query_vehicle_eta(
         current_time_service=projections[("current_time", "service")],
         future_time_physical=projections[("future_time", "physical")],
         future_time_service=projections[("future_time", "service")],
+    )
+
+
+async def query_vehicle_eta(
+    session: AsyncSession,
+    *,
+    vehicle_prefix: str,
+    queried_at: datetime,
+) -> VehicleEtaResult:
+    if queried_at.tzinfo is None:
+        raise ValueError("ETA timestamp must include a timezone.")
+
+    state_result = await session.execute(
+        text(
+            """
+            SELECT
+                vehicle.vehicle_prefix,
+                vehicle.source_timestamp,
+                vehicle.feed_id,
+                vehicle.trip_id,
+                vehicle.route_id,
+                trip.direction_id,
+                vehicle.shape_progress_m,
+                vehicle.current_origin_stop_sequence,
+                vehicle.current_destination_stop_sequence
+            FROM realtime.vehicle_current_states AS vehicle
+            LEFT JOIN core.gtfs_trips AS trip
+              ON trip.feed_id = vehicle.feed_id
+             AND trip.trip_id = vehicle.trip_id
+            WHERE vehicle.vehicle_prefix = :vehicle_prefix
+            """
+        ),
+        {"vehicle_prefix": vehicle_prefix},
+    )
+    state_rows = list(state_result.mappings())
+    if not state_rows:
+        raise VehicleNotFoundError(vehicle_prefix)
+    state = state_rows[0]
+    validate_vehicle_eta_state(state, queried_at=queried_at)
+
+    stops_result = await session.execute(
+        text(
+            """
+            SELECT stop_id, stop_sequence, shape_progress_m,
+                   arrival_seconds, departure_seconds
+            FROM core.gtfs_stop_times
+            WHERE feed_id = :feed_id
+              AND trip_id = :trip_id
+              AND stop_sequence >= :origin_stop_sequence
+            ORDER BY stop_sequence
+            """
+        ),
+        {
+            "feed_id": state["feed_id"],
+            "trip_id": state["trip_id"],
+            "origin_stop_sequence": state["current_origin_stop_sequence"],
+        },
+    )
+    stops = list(stops_result.mappings())
+    segments = build_remaining_trip_segments(state, stops)
+
+    catalog = await load_segment_estimate_catalog(
+        session,
+        segments=segments,
+        route_id=state["route_id"],
+        direction_id=state["direction_id"],
+        queried_at=queried_at,
+    )
+
+    return await compose_vehicle_eta_result(
+        state=state,
+        stops=stops,
+        segments=segments,
+        catalog=catalog,
+        queried_at=queried_at,
     )

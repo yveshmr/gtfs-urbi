@@ -28,7 +28,13 @@ class FakeSession:
 
 
 class FakeCatalog:
-    def resolve(self, segment, estimate_at, scope):  # type: ignore[no-untyped-def]
+    def resolve(  # type: ignore[no-untyped-def]
+        self,
+        segment,
+        estimate_at,
+        scope,
+        **kwargs,
+    ):
         if scope == "physical":
             return ResolvedSegmentEstimate(100, 0.8, 4, "live", 0, None)
         return ResolvedSegmentEstimate(120, 1, 2, "gtfs_planned", None, None)

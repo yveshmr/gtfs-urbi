@@ -1,7 +1,10 @@
+from dataclasses import asdict
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
+
+from app.services.vehicle_eta_query import VehicleEtaResult
 
 
 class EtaTargetResponse(BaseModel):
@@ -39,3 +42,38 @@ class VehicleEtaResponse(BaseModel):
     remaining_segment_count: int
     current_time: EtaScenarioResponse
     future_time: EtaScenarioResponse
+
+
+class VehicleEtaSnapshotResponse(VehicleEtaResponse):
+    generated_at: datetime
+
+
+class VehicleEtaSnapshotListResponse(BaseModel):
+    generated_at: datetime | None
+    count: int
+    vehicles: list[VehicleEtaSnapshotResponse]
+
+
+def build_vehicle_eta_response(
+    result: VehicleEtaResult,
+    *,
+    queried_at: datetime,
+) -> VehicleEtaResponse:
+    return VehicleEtaResponse(
+        queried_at=queried_at,
+        vehicle_prefix=result.vehicle_prefix,
+        trip_id=result.trip_id,
+        route_id=result.route_id,
+        direction_id=result.direction_id,
+        next_stop_id=result.next_stop_id,
+        terminal_stop_id=result.terminal_stop_id,
+        remaining_segment_count=result.remaining_segment_count,
+        current_time=EtaScenarioResponse(
+            physical=EtaProjectionResponse(**asdict(result.current_time_physical)),
+            service=EtaProjectionResponse(**asdict(result.current_time_service)),
+        ),
+        future_time=EtaScenarioResponse(
+            physical=EtaProjectionResponse(**asdict(result.future_time_physical)),
+            service=EtaProjectionResponse(**asdict(result.future_time_service)),
+        ),
+    )

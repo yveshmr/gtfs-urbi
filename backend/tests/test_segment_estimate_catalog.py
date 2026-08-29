@@ -7,10 +7,7 @@ from app.services.segment_aggregation import (
     historical_profile_slots,
     metric_identities_for_segment,
 )
-from app.services.segment_estimate_catalog import (
-    PlannedTraversal,
-    SegmentEstimateCatalog,
-)
+from app.services.segment_estimate_catalog import SegmentEstimateCatalog
 from app.services.vehicle_eta import RemainingTripSegment
 
 NOW = datetime(2026, 8, 29, 13, 2, tzinfo=UTC)
@@ -20,11 +17,9 @@ SEGMENT = RemainingTripSegment("A", "B", 1, 2, 1.0)
 
 def empty_catalog(**overrides):  # type: ignore[no-untyped-def]
     values = {
-        "route_id": "route",
-        "direction_id": 0,
         "live_by_key": {},
         "profiles_by_key_and_slot": {},
-        "planned_by_scope_and_pair": {},
+        "planned_by_scope_pair_and_slot": {},
     }
     values.update(overrides)
     return SegmentEstimateCatalog(**values)
@@ -48,7 +43,9 @@ def test_catalog_prefers_recent_live_metric() -> None:
         }
     )
 
-    result = catalog.resolve(SEGMENT, NOW, "physical")
+    result = catalog.resolve(
+        SEGMENT, NOW, "physical", route_id="route", direction_id=0
+    )
 
     assert result.source == "live"
     assert result.value_seconds == 75
@@ -81,7 +78,9 @@ def test_catalog_uses_nearest_historical_slot_after_live_expires() -> None:
         },
     )
 
-    result = catalog.resolve(SEGMENT, NOW, "physical")
+    result = catalog.resolve(
+        SEGMENT, NOW, "physical", route_id="route", direction_id=0
+    )
 
     assert result.source == "historical"
     assert result.value_seconds == 90
@@ -95,15 +94,22 @@ def test_catalog_uses_first_planned_slot_with_equal_trip_weight() -> None:
         microsecond=0,
     )
     catalog = empty_catalog(
-        planned_by_scope_and_pair={
-            ("service", "A", "B"): (
-                PlannedTraversal(local_window, 80),
-                PlannedTraversal(local_window + timedelta(minutes=1), 100),
-            )
+        planned_by_scope_pair_and_slot={
+            (
+                "service",
+                "A",
+                "B",
+                "route",
+                0,
+                local_window.date(),
+                (local_window.hour * 60 + local_window.minute) // 5,
+            ): EstimateCandidate(90, 1, 2)
         }
     )
 
-    result = catalog.resolve(SEGMENT, NOW, "service")
+    result = catalog.resolve(
+        SEGMENT, NOW, "service", route_id="route", direction_id=0
+    )
 
     assert result.source == "gtfs_planned"
     assert result.value_seconds == 90

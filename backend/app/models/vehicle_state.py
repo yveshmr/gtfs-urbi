@@ -148,3 +148,29 @@ class VehicleCurrentState(Base):
     )
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class VehicleEtaSnapshot(Base):
+    __tablename__ = "vehicle_eta_snapshots"
+    __table_args__ = (
+        Index("ix_vehicle_eta_snapshots_generated_at", "generated_at"),
+        Index("ix_vehicle_eta_snapshots_route", "route_id", "direction_id"),
+        {"schema": "realtime"},
+    )
+
+    vehicle_prefix: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey(
+            "realtime.vehicle_current_states.vehicle_prefix",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    source_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    trip_id: Mapped[str] = mapped_column(String(150), nullable=False)
+    route_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    direction_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

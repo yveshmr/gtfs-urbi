@@ -19,7 +19,7 @@ from app.models.segment_metrics import (
     SegmentProfile5m,
     SegmentProfileRefreshState,
 )
-from app.models.vehicle_state import VehicleCurrentState
+from app.models.vehicle_state import VehicleCurrentState, VehicleEtaSnapshot
 
 __all__ = [
     "ApiResponse",
@@ -41,4 +41,5 @@ __all__ = [
     "SegmentProfile5m",
     "SegmentProfileRefreshState",
     "VehicleCurrentState",
+    "VehicleEtaSnapshot",
 ]

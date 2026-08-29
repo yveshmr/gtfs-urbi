@@ -1,4 +1,3 @@
-from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -7,17 +6,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_database_session
 from app.schemas.vehicle_eta import (
-    EtaProjectionResponse,
-    EtaScenarioResponse,
     VehicleEtaResponse,
+    VehicleEtaSnapshotListResponse,
+    build_vehicle_eta_response,
 )
 from app.services.vehicle_eta_query import (
     VehicleEtaUnavailableError,
     VehicleNotFoundError,
     query_vehicle_eta,
 )
+from app.services.vehicle_eta_snapshot import query_vehicle_eta_snapshots
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
+
+
+@router.get("/eta-snapshots", response_model=VehicleEtaSnapshotListResponse)
+async def vehicle_eta_snapshots(
+    session: Annotated[AsyncSession, Depends(get_database_session)],
+) -> VehicleEtaSnapshotListResponse:
+    return await query_vehicle_eta_snapshots(session)
 
 
 @router.get("/{vehicle_prefix}/eta", response_model=VehicleEtaResponse)
@@ -44,21 +51,4 @@ async def vehicle_eta(
             detail=str(error),
         ) from error
 
-    return VehicleEtaResponse(
-        queried_at=timestamp,
-        vehicle_prefix=result.vehicle_prefix,
-        trip_id=result.trip_id,
-        route_id=result.route_id,
-        direction_id=result.direction_id,
-        next_stop_id=result.next_stop_id,
-        terminal_stop_id=result.terminal_stop_id,
-        remaining_segment_count=result.remaining_segment_count,
-        current_time=EtaScenarioResponse(
-            physical=EtaProjectionResponse(**asdict(result.current_time_physical)),
-            service=EtaProjectionResponse(**asdict(result.current_time_service)),
-        ),
-        future_time=EtaScenarioResponse(
-            physical=EtaProjectionResponse(**asdict(result.future_time_physical)),
-            service=EtaProjectionResponse(**asdict(result.future_time_service)),
-        ),
-    )
+    return build_vehicle_eta_response(result, queried_at=timestamp)
