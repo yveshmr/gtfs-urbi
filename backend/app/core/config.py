@@ -26,6 +26,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CITTATI_PASS", "CITTATI_PASSWORD"),
     )
     cittati_timeout_seconds: float = 30.0
+    cittati_poll_interval_seconds: float = 10.0
+    cittati_retry_initial_seconds: float = 2.0
+    cittati_retry_max_seconds: float = 30.0
+    cittati_operational_stale_after_seconds: float = 60.0
 
     gtfs_static_url: str = "https://servicos.cittati.com.br/GTFS_PLATAFORMA/URBI/GTFS_URBI.zip"
     gtfs_static_timeout_seconds: float = 60.0
