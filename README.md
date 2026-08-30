@@ -34,7 +34,16 @@ máximo uma vez por janela de cinco minutos.
 - `GET /health/operational`: última ingestão válida da Cittati;
 - `GET /api/v1/vehicles/eta-snapshots`: snapshot materializado da frota;
 - `GET /api/v1/vehicles/{vehicle_prefix}/eta`: ETA calculado sob demanda;
+- `GET /api/v1/prescriptions/vehicle-swaps`: realocação global por terminal;
 - `GET /api/v1/segments/estimate`: estimativa de um trecho.
+
+O endpoint prescritivo usa o ETA futuro até o terminal e a próxima viagem
+informada pela Cittati. Para cada terminal, ele minimiza a soma dos atrasos por
+meio de uma alocação global, permitindo cadeias com mais de dois veículos.
+Viagens com atraso original estritamente superior a dez minutos acionam a
+análise. Um compromisso viável cuja partida esteja nos próximos dez minutos
+permanece protegido. As recomendações usam o snapshot mais recente e não são
+armazenadas como histórico.
 
 O worker realiza chamadas externas à Cittati. Para validar somente a construção
 das imagens, sem iniciar a ingestão, use:
