@@ -112,11 +112,38 @@ export interface VehicleEtaSnapshotList {
   vehicles: VehicleEtaSnapshot[]
 }
 
+export interface VehicleScheduleContext {
+  vehicle_prefix: string
+  planned_start_at: string | null
+  actual_start_at: string | null
+  planned_end_at: string | null
+  actual_end_at: string | null
+  origin_name: string | null
+  destination_name: string | null
+  attendance_code: string | null
+  activity: string | null
+  schedule_table: string | null
+  line: string | null
+  direction: string | null
+  day_type: string | null
+  trip_number: string | null
+}
+
+export interface VehicleScheduleContextList {
+  status: 'ready' | 'stale'
+  generated_at: string
+  cache_age_seconds: number
+  count: number
+  vehicles: VehicleScheduleContext[]
+}
+
 export interface SwapAssignment {
   commitment_vehicle_prefix: string
   assigned_vehicle_prefix: string
   departure_at: string
+  commitment_vehicle_arrival_at: string
   assigned_vehicle_arrival_at: string
+  assigned_arrival_margin_seconds: number
   next_line: string | null
   next_direction: string | null
   next_destination: string | null
@@ -130,6 +157,20 @@ export interface SwapAssignment {
   changed: boolean
 }
 
+export interface ExchangeGroup {
+  group_id: string
+  terminal_id: string
+  vehicle_prefixes: string[]
+  vehicle_count: number
+  baseline_total_delay_seconds: number
+  proposed_total_delay_seconds: number
+  saved_delay_seconds: number
+  baseline_max_delay_seconds: number
+  proposed_max_delay_seconds: number
+  minimum_eta_reliability: number
+  steps: SwapAssignment[]
+}
+
 export interface TerminalSwapPlan {
   terminal_id: string
   baseline_total_delay_seconds: number
@@ -139,6 +180,7 @@ export interface TerminalSwapPlan {
   proposed_delayed_trip_count: number
   baseline_max_delay_seconds: number
   proposed_max_delay_seconds: number
+  exchange_groups: ExchangeGroup[]
   assignments: SwapAssignment[]
 }
 

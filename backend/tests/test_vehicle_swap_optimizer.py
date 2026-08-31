@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.services.vehicle_swap_optimizer import (
     VehicleCommitment,
+    build_exchange_groups,
     optimize_terminal_assignments,
 )
 
@@ -64,6 +65,11 @@ def test_optimizer_supports_terminal_wide_reallocation_chain() -> None:
         item.commitment.vehicle_prefix: item.assigned_vehicle.vehicle_prefix
         for item in plan.assignments
     } == {"A": "B", "B": "C", "C": "A"}
+    groups = build_exchange_groups(plan)
+    assert len(groups) == 1
+    assert groups[0].group_id == "terminal-1-G01"
+    assert groups[0].vehicle_prefixes == ("A", "B", "C")
+    assert groups[0].saved_delay_seconds == 35 * 60
 
 
 def test_viable_commitment_inside_window_is_protected() -> None:

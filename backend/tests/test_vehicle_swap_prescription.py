@@ -98,6 +98,11 @@ async def test_query_builds_global_terminal_plan() -> None:
         assignment.commitment_vehicle_prefix: assignment.assigned_vehicle_prefix
         for assignment in response.plans[0].assignments
     } == {"A": "B", "B": "C", "C": "A"}
+    group = response.plans[0].exchange_groups[0]
+    assert group.group_id == "terminal-1-G01"
+    assert group.vehicle_count == 3
+    assert [step.assigned_vehicle_prefix for step in group.steps] == ["B", "C", "A"]
+    assert group.steps[0].commitment_vehicle_arrival_at == NOW + timedelta(minutes=35)
 
 
 @pytest.mark.asyncio

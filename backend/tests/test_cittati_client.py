@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+from datetime import date
 
 import httpx
 import pytest
@@ -101,3 +102,44 @@ async def test_authentication_failure_does_not_request_vehicles() -> None:
             await client.fetch_vehicles()
 
     assert request_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_trips_uses_authenticated_company_and_reuses_session() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/Autenticacao/AutenticarUsuario"):
+            return httpx.Response(
+                200,
+                json={
+                    "retornoOK": True,
+                    "token": "session-token",
+                    "empresas": ["authenticated-company"],
+                },
+            )
+        return httpx.Response(200, json={"retornoOK": True, "viagens": []})
+
+    async with httpx.AsyncClient(
+        base_url="https://cittati.example/WSIntegracaoCittati/",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        client = CittatiClient(
+            base_url="https://ignored.example",
+            username="integration-user",
+            password="integration-password",
+            company="vehicle-endpoint-company",
+            http_client=http_client,
+        )
+        await client.fetch_vehicles()
+        result = await client.fetch_trips(service_date=date(2026, 8, 31))
+
+    assert len([request for request in requests if "AutenticarUsuario" in request.url.path]) == 1
+    trips_request = requests[-1]
+    assert trips_request.url.path.endswith("/Operacional/ConsultarViagens")
+    assert dict(trips_request.url.params) == {
+        "data": "31/08/2026",
+        "empresa": "authenticated-company",
+    }
+    assert result.endpoint_name == "Operacional/ConsultarViagens"

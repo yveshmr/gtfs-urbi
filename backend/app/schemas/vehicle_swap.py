@@ -8,7 +8,9 @@ class SwapAssignmentResponse(BaseModel):
     commitment_vehicle_prefix: str
     assigned_vehicle_prefix: str
     departure_at: datetime
+    commitment_vehicle_arrival_at: datetime
     assigned_vehicle_arrival_at: datetime
+    assigned_arrival_margin_seconds: int
     next_line: str | None
     next_direction: str | None
     next_destination: str | None
@@ -22,6 +24,20 @@ class SwapAssignmentResponse(BaseModel):
     changed: bool
 
 
+class ExchangeGroupResponse(BaseModel):
+    group_id: str
+    terminal_id: str
+    vehicle_prefixes: list[str]
+    vehicle_count: int
+    baseline_total_delay_seconds: int
+    proposed_total_delay_seconds: int
+    saved_delay_seconds: int
+    baseline_max_delay_seconds: int
+    proposed_max_delay_seconds: int
+    minimum_eta_reliability: float
+    steps: list[SwapAssignmentResponse]
+
+
 class TerminalSwapPlanResponse(BaseModel):
     terminal_id: str
     baseline_total_delay_seconds: int
@@ -31,6 +47,7 @@ class TerminalSwapPlanResponse(BaseModel):
     proposed_delayed_trip_count: int
     baseline_max_delay_seconds: int
     proposed_max_delay_seconds: int
+    exchange_groups: list[ExchangeGroupResponse]
     assignments: list[SwapAssignmentResponse]
 
 

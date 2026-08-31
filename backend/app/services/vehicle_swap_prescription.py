@@ -9,13 +9,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.vehicle_swap import (
+    ExchangeGroupResponse,
     SwapAssignmentResponse,
     TerminalSwapPlanResponse,
     VehicleSwapPrescriptionResponse,
 )
 from app.services.vehicle_swap_optimizer import (
     TerminalSwapPlan,
+    VehicleAssignment,
     VehicleCommitment,
+    build_exchange_groups,
     optimize_terminal_assignments,
 )
 
@@ -42,9 +45,7 @@ def resolve_planned_departure(value: str, *, reference: datetime) -> datetime:
         )
         for day_offset in (-1, 0, 1)
     ]
-    return min(candidates, key=lambda candidate: abs(candidate - local_reference)).astimezone(
-        UTC
-    )
+    return min(candidates, key=lambda candidate: abs(candidate - local_reference)).astimezone(UTC)
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -102,7 +103,32 @@ def _commitment_from_row(
     )
 
 
+def _response_assignment(assignment: VehicleAssignment) -> SwapAssignmentResponse:
+    return SwapAssignmentResponse(
+        commitment_vehicle_prefix=assignment.commitment.vehicle_prefix,
+        assigned_vehicle_prefix=assignment.assigned_vehicle.vehicle_prefix,
+        departure_at=assignment.commitment.departure_at,
+        commitment_vehicle_arrival_at=assignment.commitment.arrival_at,
+        assigned_vehicle_arrival_at=assignment.assigned_vehicle.arrival_at,
+        assigned_arrival_margin_seconds=assignment.assigned_arrival_margin_seconds,
+        next_line=assignment.commitment.next_line,
+        next_direction=assignment.commitment.next_direction,
+        next_destination=assignment.commitment.next_destination,
+        next_schedule_position=assignment.commitment.next_schedule_position,
+        baseline_delay_seconds=assignment.baseline_delay_seconds,
+        proposed_delay_seconds=assignment.proposed_delay_seconds,
+        delay_reduction_seconds=(
+            assignment.baseline_delay_seconds - assignment.proposed_delay_seconds
+        ),
+        eta_reliability=assignment.assigned_vehicle.eta_reliability,
+        eta_source_counts=assignment.assigned_vehicle.eta_source_counts,
+        protected=assignment.protected,
+        changed=assignment.changed,
+    )
+
+
 def _response_plan(plan: TerminalSwapPlan) -> TerminalSwapPlanResponse:
+    groups = build_exchange_groups(plan)
     return TerminalSwapPlanResponse(
         terminal_id=plan.terminal_id,
         baseline_total_delay_seconds=plan.baseline_total_delay_seconds,
@@ -112,28 +138,23 @@ def _response_plan(plan: TerminalSwapPlan) -> TerminalSwapPlanResponse:
         proposed_delayed_trip_count=plan.proposed_delayed_trip_count,
         baseline_max_delay_seconds=plan.baseline_max_delay_seconds,
         proposed_max_delay_seconds=plan.proposed_max_delay_seconds,
-        assignments=[
-            SwapAssignmentResponse(
-                commitment_vehicle_prefix=assignment.commitment.vehicle_prefix,
-                assigned_vehicle_prefix=assignment.assigned_vehicle.vehicle_prefix,
-                departure_at=assignment.commitment.departure_at,
-                assigned_vehicle_arrival_at=assignment.assigned_vehicle.arrival_at,
-                next_line=assignment.commitment.next_line,
-                next_direction=assignment.commitment.next_direction,
-                next_destination=assignment.commitment.next_destination,
-                next_schedule_position=assignment.commitment.next_schedule_position,
-                baseline_delay_seconds=assignment.baseline_delay_seconds,
-                proposed_delay_seconds=assignment.proposed_delay_seconds,
-                delay_reduction_seconds=(
-                    assignment.baseline_delay_seconds - assignment.proposed_delay_seconds
-                ),
-                eta_reliability=assignment.assigned_vehicle.eta_reliability,
-                eta_source_counts=assignment.assigned_vehicle.eta_source_counts,
-                protected=assignment.protected,
-                changed=assignment.changed,
+        exchange_groups=[
+            ExchangeGroupResponse(
+                group_id=group.group_id,
+                terminal_id=group.terminal_id,
+                vehicle_prefixes=list(group.vehicle_prefixes),
+                vehicle_count=len(group.assignments),
+                baseline_total_delay_seconds=group.baseline_total_delay_seconds,
+                proposed_total_delay_seconds=group.proposed_total_delay_seconds,
+                saved_delay_seconds=group.saved_delay_seconds,
+                baseline_max_delay_seconds=group.baseline_max_delay_seconds,
+                proposed_max_delay_seconds=group.proposed_max_delay_seconds,
+                minimum_eta_reliability=group.minimum_eta_reliability,
+                steps=[_response_assignment(item) for item in group.assignments],
             )
-            for assignment in plan.assignments
+            for group in groups
         ],
+        assignments=[_response_assignment(item) for item in plan.assignments],
     )
 
 

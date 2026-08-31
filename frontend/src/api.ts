@@ -3,6 +3,7 @@ import type {
   TripGeometry,
   VehicleEta,
   VehicleEtaSnapshotList,
+  VehicleScheduleContextList,
   VehicleSwapPrescription,
 } from './types'
 
@@ -53,6 +54,10 @@ export function getVehicleEta(vehiclePrefix: string, signal?: AbortSignal) {
 
 export function getVehicleEtaSnapshots(signal?: AbortSignal) {
   return request<VehicleEtaSnapshotList>('/api/v1/vehicles/eta-snapshots', signal)
+}
+
+export function getVehicleScheduleContexts(signal?: AbortSignal) {
+  return request<VehicleScheduleContextList>('/api/v1/vehicles/schedule-contexts', signal)
 }
 
 export function getVehicleSwapPrescriptions(signal?: AbortSignal) {

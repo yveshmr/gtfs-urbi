@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from time import perf_counter
 from typing import Any
 
@@ -54,6 +54,9 @@ class CittatiClient:
             base_url=f"{base_url.rstrip('/')}/",
             timeout=timeout_seconds,
         )
+        self._token: str | None = None
+        self._companies: tuple[str, ...] = ()
+        self._authenticated_at: datetime | None = None
 
     async def __aenter__(self) -> CittatiClient:
         return self
@@ -86,10 +89,26 @@ class CittatiClient:
                 f"Cittati authentication failed ({error_code}): {description}"
             )
 
+        companies = payload.get("empresas")
+        if isinstance(companies, list):
+            self._companies = tuple(
+                str(company).strip() for company in companies if str(company).strip()
+            )
+        self._token = token
+        self._authenticated_at = datetime.now(UTC)
         return token
 
+    async def _session_token(self) -> str:
+        if (
+            self._token is not None
+            and self._authenticated_at is not None
+            and datetime.now(UTC) - self._authenticated_at < timedelta(hours=23)
+        ):
+            return self._token
+        return await self.authenticate()
+
     async def fetch_vehicles(self, *, model: int = 4) -> CittatiRawResponse:
-        token = await self.authenticate()
+        token = await self._session_token()
         request_params: dict[str, str | int] = {
             "empresa": self._company,
             "modelo": model,
@@ -109,6 +128,36 @@ class CittatiClient:
 
         return CittatiRawResponse(
             endpoint_name="operacional/veiculos",
+            requested_at=requested_at,
+            received_at=received_at,
+            duration_ms=duration_ms,
+            http_status=response.status_code,
+            request_params=request_params,
+            payload_hash=hashlib.sha256(response.content).hexdigest(),
+            payload=payload,
+        )
+
+    async def fetch_trips(self, *, service_date: date) -> CittatiRawResponse:
+        """Fetch the documented daily trip roster without interpreting its payload."""
+        token = await self._session_token()
+        company = self._companies[0] if self._companies else self._company
+        request_params: dict[str, str | int] = {
+            "data": service_date.strftime("%d/%m/%Y"),
+            "empresa": company,
+        }
+        requested_at = datetime.now(UTC)
+        started_at = perf_counter()
+        response = await self._http_client.get(
+            "Operacional/ConsultarViagens",
+            params=request_params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
+        received_at = datetime.now(UTC)
+        duration_ms = round((perf_counter() - started_at) * 1000)
+        payload = self._decode_json(response)
+        return CittatiRawResponse(
+            endpoint_name="Operacional/ConsultarViagens",
             requested_at=requested_at,
             received_at=received_at,
             duration_ms=duration_ms,

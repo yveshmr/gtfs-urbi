@@ -32,6 +32,12 @@ class VehicleAssignment:
     def changed(self) -> bool:
         return self.commitment.vehicle_prefix != self.assigned_vehicle.vehicle_prefix
 
+    @property
+    def assigned_arrival_margin_seconds(self) -> int:
+        return round(
+            (self.commitment.departure_at - self.assigned_vehicle.arrival_at).total_seconds()
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TerminalSwapPlan:
@@ -47,6 +53,74 @@ class TerminalSwapPlan:
     @property
     def saved_delay_seconds(self) -> int:
         return self.baseline_total_delay_seconds - self.proposed_total_delay_seconds
+
+
+@dataclass(frozen=True, slots=True)
+class ExchangeGroup:
+    group_id: str
+    terminal_id: str
+    assignments: tuple[VehicleAssignment, ...]
+
+    @property
+    def vehicle_prefixes(self) -> tuple[str, ...]:
+        return tuple(item.commitment.vehicle_prefix for item in self.assignments)
+
+    @property
+    def baseline_total_delay_seconds(self) -> int:
+        return sum(item.baseline_delay_seconds for item in self.assignments)
+
+    @property
+    def proposed_total_delay_seconds(self) -> int:
+        return sum(item.proposed_delay_seconds for item in self.assignments)
+
+    @property
+    def saved_delay_seconds(self) -> int:
+        return self.baseline_total_delay_seconds - self.proposed_total_delay_seconds
+
+    @property
+    def baseline_max_delay_seconds(self) -> int:
+        return max((item.baseline_delay_seconds for item in self.assignments), default=0)
+
+    @property
+    def proposed_max_delay_seconds(self) -> int:
+        return max((item.proposed_delay_seconds for item in self.assignments), default=0)
+
+    @property
+    def minimum_eta_reliability(self) -> float:
+        return min(
+            (item.assigned_vehicle.eta_reliability for item in self.assignments),
+            default=0,
+        )
+
+
+def build_exchange_groups(plan: TerminalSwapPlan) -> tuple[ExchangeGroup, ...]:
+    """Decompose the changed assignment permutation into closed exchange cycles."""
+    changed_by_commitment = {
+        item.commitment.vehicle_prefix: item for item in plan.assignments if item.changed
+    }
+    unvisited = set(changed_by_commitment)
+    cycles: list[tuple[VehicleAssignment, ...]] = []
+    while unvisited:
+        start = min(unvisited)
+        current = start
+        cycle: list[VehicleAssignment] = []
+        while current in unvisited:
+            unvisited.remove(current)
+            assignment = changed_by_commitment[current]
+            cycle.append(assignment)
+            current = assignment.assigned_vehicle.vehicle_prefix
+        if current != start:
+            raise ValueError("Changed vehicle assignments must form closed exchange cycles.")
+        cycles.append(tuple(cycle))
+
+    return tuple(
+        ExchangeGroup(
+            group_id=f"{plan.terminal_id}-G{index:02d}",
+            terminal_id=plan.terminal_id,
+            assignments=cycle,
+        )
+        for index, cycle in enumerate(cycles, start=1)
+    )
 
 
 def delay_seconds(arrival_at: datetime, departure_at: datetime) -> int:
@@ -126,12 +200,7 @@ def _assignment_cost(
     max_idle_total = group_size * 24 * 60 * 60
     swap_weight = max_idle_total + 1
     delayed_trip_weight = group_size * swap_weight + max_idle_total + 1
-    delay_weight = (
-        group_size * delayed_trip_weight
-        + group_size * swap_weight
-        + max_idle_total
-        + 1
-    )
+    delay_weight = group_size * delayed_trip_weight + group_size * swap_weight + max_idle_total + 1
     changed = vehicle.vehicle_prefix != commitment.vehicle_prefix
     return (
         delay * delay_weight
@@ -190,9 +259,9 @@ def optimize_terminal_assignments(
     assignments: list[VehicleAssignment] = []
     for commitment in commitments:
         is_protected = commitment in protected
-        assigned_vehicle = commitment if is_protected else assigned_by_commitment[
-            commitment.vehicle_prefix
-        ]
+        assigned_vehicle = (
+            commitment if is_protected else assigned_by_commitment[commitment.vehicle_prefix]
+        )
         assignments.append(
             VehicleAssignment(
                 commitment=commitment,
