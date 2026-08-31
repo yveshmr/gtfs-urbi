@@ -2,6 +2,8 @@ import type {
   FleetPositionResponse,
   TripGeometry,
   VehicleEta,
+  VehicleEtaSnapshotList,
+  VehicleSwapPrescription,
 } from './types'
 
 export class ApiError extends Error {
@@ -47,4 +49,12 @@ export function getVehicleEta(vehiclePrefix: string, signal?: AbortSignal) {
     `/api/v1/vehicles/${encodeURIComponent(vehiclePrefix)}/eta`,
     signal,
   )
+}
+
+export function getVehicleEtaSnapshots(signal?: AbortSignal) {
+  return request<VehicleEtaSnapshotList>('/api/v1/vehicles/eta-snapshots', signal)
+}
+
+export function getVehicleSwapPrescriptions(signal?: AbortSignal) {
+  return request<VehicleSwapPrescription>('/api/v1/prescriptions/vehicle-swaps', signal)
 }

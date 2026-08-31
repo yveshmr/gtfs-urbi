@@ -101,3 +101,57 @@ export interface VehicleEta {
   current_time: EtaScenario
   future_time: EtaScenario
 }
+
+export interface VehicleEtaSnapshot extends VehicleEta {
+  generated_at: string
+}
+
+export interface VehicleEtaSnapshotList {
+  generated_at: string | null
+  count: number
+  vehicles: VehicleEtaSnapshot[]
+}
+
+export interface SwapAssignment {
+  commitment_vehicle_prefix: string
+  assigned_vehicle_prefix: string
+  departure_at: string
+  assigned_vehicle_arrival_at: string
+  next_line: string | null
+  next_direction: string | null
+  next_destination: string | null
+  next_schedule_position: string | null
+  baseline_delay_seconds: number
+  proposed_delay_seconds: number
+  delay_reduction_seconds: number
+  eta_reliability: number
+  eta_source_counts: Record<string, number>
+  protected: boolean
+  changed: boolean
+}
+
+export interface TerminalSwapPlan {
+  terminal_id: string
+  baseline_total_delay_seconds: number
+  proposed_total_delay_seconds: number
+  saved_delay_seconds: number
+  baseline_delayed_trip_count: number
+  proposed_delayed_trip_count: number
+  baseline_max_delay_seconds: number
+  proposed_max_delay_seconds: number
+  assignments: SwapAssignment[]
+}
+
+export interface VehicleSwapPrescription {
+  status: 'ready' | 'no_data' | 'stale'
+  evaluated_at: string
+  snapshot_generated_at: string | null
+  snapshot_age_seconds: number | null
+  delay_threshold_minutes: number
+  protected_window_minutes: number
+  eligible_vehicle_count: number
+  terminal_count: number
+  plan_count: number
+  total_saved_delay_seconds: number
+  plans: TerminalSwapPlan[]
+}

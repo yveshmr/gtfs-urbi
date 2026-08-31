@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 
 import { ApiError, getTripGeometry, getVehicleEta } from './api'
+import { FleetTable } from './components/FleetTable'
+import { PrescriptionsTable } from './components/PrescriptionsTable'
 import { VehicleDetails } from './components/VehicleDetails'
 import { useFleetPositions } from './hooks/useFleetPositions'
 import type { ProjectedVehiclePosition, TripGeometry, VehicleEta } from './types'
@@ -24,12 +26,16 @@ const OperationsMap = lazy(() =>
   import('./components/OperationsMap').then((module) => ({ default: module.OperationsMap })),
 )
 
+type ActiveView = 'overview' | 'map' | 'fleet' | 'prescriptions'
+
 function App() {
   const { data, error, loading, refresh } = useFleetPositions()
   const [selectedPrefix, setSelectedPrefix] = useState<string | null>(() =>
     window.sessionStorage.getItem('gtfs-on-time-selected-vehicle'),
   )
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [activeView, setActiveView] = useState<ActiveView>('map')
+  const [viewRefreshToken, setViewRefreshToken] = useState(0)
   const selectedVehicleSnapshot = useRef<ProjectedVehiclePosition | null>(null)
   const [geometry, setGeometry] = useState<TripGeometry | null>(null)
   const [eta, setEta] = useState<VehicleEta | null>(null)
@@ -116,6 +122,24 @@ function App() {
     window.sessionStorage.removeItem('gtfs-on-time-selected-vehicle')
   }
 
+  const openVehicleOnMap = (prefix: string) => {
+    selectVehicle(prefix)
+    setActiveView('map')
+  }
+
+  const refreshCurrentView = () => {
+    void refresh()
+    setViewRefreshToken((token) => token + 1)
+  }
+
+  const viewCopy: Record<ActiveView, { eyebrow: string; title: string; accent: string }> = {
+    overview: { eyebrow: 'Centro de controle operacional', title: 'Visão', accent: 'geral' },
+    map: { eyebrow: 'Monitoramento operacional', title: 'Frota', accent: 'em tempo real' },
+    fleet: { eyebrow: 'Acompanhamento veículo a veículo', title: 'Tabela', accent: 'da frota' },
+    prescriptions: { eyebrow: 'Otimização global por terminal', title: 'Ações', accent: 'prescritivas' },
+  }
+  const currentViewCopy = viewCopy[activeView]
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -150,24 +174,24 @@ function App() {
         aria-hidden={!sidebarOpen}
         inert={!sidebarOpen}
       >
-        <button className="sidebar-button"><LayoutDashboard size={20} /><span>Visão geral</span></button>
-        <button className="sidebar-button active"><MapPinned size={20} /><span>Mapa</span></button>
-        <button className="sidebar-button"><TableProperties size={20} /><span>Frota</span></button>
-        <button className="sidebar-button"><Sparkles size={20} /><span>Prescrições</span></button>
+        <button className={`sidebar-button ${activeView === 'overview' ? 'active' : ''}`} onClick={() => setActiveView('overview')}><LayoutDashboard size={20} /><span>Visão geral</span></button>
+        <button className={`sidebar-button ${activeView === 'map' ? 'active' : ''}`} onClick={() => setActiveView('map')}><MapPinned size={20} /><span>Mapa</span></button>
+        <button className={`sidebar-button ${activeView === 'fleet' ? 'active' : ''}`} onClick={() => setActiveView('fleet')}><TableProperties size={20} /><span>Frota</span></button>
+        <button className={`sidebar-button ${activeView === 'prescriptions' ? 'active' : ''}`} onClick={() => setActiveView('prescriptions')}><Sparkles size={20} /><span>Prescrições</span></button>
       </nav>
 
       <main className={`workspace ${sidebarOpen ? '' : 'sidebar-closed'}`}>
         <div className="workspace-heading">
           <div>
-            <span className="eyebrow">Monitoramento operacional</span>
-            <h1><span>Frota</span> em tempo real</h1>
+            <span className="eyebrow">{currentViewCopy.eyebrow}</span>
+            <h1><span>{currentViewCopy.title}</span> {currentViewCopy.accent}</h1>
           </div>
-          <button className="refresh-button" onClick={() => void refresh()} disabled={loading}>
+          <button className="refresh-button" onClick={refreshCurrentView} disabled={loading && activeView === 'map'}>
             <RefreshCw size={17} className={loading ? 'spin' : ''} /> Atualizar agora
           </button>
         </div>
 
-        <section className="kpi-strip" aria-label="Indicadores da frota">
+        {(activeView === 'overview' || activeView === 'map') && <section className="kpi-strip" aria-label="Indicadores da frota">
           <article className="kpi-card blue">
             <div className="kpi-icon"><BusFront size={21} /></div>
             <div><span>Veículos projetados</span><strong>{data?.count ?? '—'}</strong><small>map matching resolvido</small></div>
@@ -184,9 +208,23 @@ function App() {
             <div className="kpi-icon">{error ? <AlertCircle size={21} /> : <span className="signal-bars">▮▮▮</span>}</div>
             <div><span>Status da atualização</span><strong className="status-copy">{error ? 'Atenção' : 'Operacional'}</strong><small>{error ?? 'ciclo de 10 segundos'}</small></div>
           </article>
-        </section>
+        </section>}
 
-        <section className="map-card">
+        {activeView === 'overview' && (
+          <section className="overview-grid">
+            <button onClick={() => setActiveView('map')}>
+              <MapPinned size={25} /><span><strong>Mapa operacional</strong><small>Acompanhar posições, rotas e ETAs em tempo real</small></span><ChevronRight size={19} />
+            </button>
+            <button onClick={() => setActiveView('fleet')}>
+              <TableProperties size={25} /><span><strong>Tabela da frota</strong><small>Comparar situação e previsão de cada veículo</small></span><ChevronRight size={19} />
+            </button>
+            <button onClick={() => setActiveView('prescriptions')}>
+              <Sparkles size={25} /><span><strong>Prescrições do CCO</strong><small>Priorizar trocas que reduzem o atraso global</small></span><ChevronRight size={19} />
+            </button>
+          </section>
+        )}
+
+        {activeView === 'map' && <section className="map-card">
           <div className="map-toolbar">
             <div className="vehicle-search">
               <Search size={18} />
@@ -235,7 +273,19 @@ function App() {
               onClose={clearSelectedVehicle}
             />
           )}
-        </section>
+        </section>}
+
+        {activeView === 'fleet' && (
+          <FleetTable
+            positions={vehicles}
+            refreshToken={viewRefreshToken}
+            onOpenVehicle={openVehicleOnMap}
+          />
+        )}
+
+        {activeView === 'prescriptions' && (
+          <PrescriptionsTable refreshToken={viewRefreshToken} />
+        )}
       </main>
     </div>
   )
