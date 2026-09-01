@@ -9,8 +9,9 @@ import type {
   VehicleScheduleContext,
   VehicleScheduleContextList,
 } from '../types'
-import { formatClock, formatPercent } from '../utils/format'
+import { formatClock, formatMinutes, formatPercent } from '../utils/format'
 import { classifyVehicleDelay } from '../utils/operationalStatus'
+import { buildVehicleAlerts, type VehicleAlerts } from '../utils/vehicleAlerts'
 import { ColumnFilter } from './ColumnFilter'
 import { compareSortValues, SortableHeader, type SortState } from './SortableHeader'
 
@@ -42,6 +43,7 @@ interface FleetRow {
   departureDelay: number | null
   status: string
   statusKey: 'on-time' | 'warning' | 'delayed' | 'no-reference'
+  alerts: VehicleAlerts
 }
 
 function sortValue(row: FleetRow, key: FilterKey): unknown {
@@ -115,6 +117,12 @@ export function FleetTable({
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [sort, setSort] = useState<SortState<FilterKey>>({ key: 'eta', direction: 'asc' })
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     setFilters({ ...EMPTY_FILTERS, status: presetStatus ?? '' })
@@ -155,11 +163,12 @@ export function FleetTable({
     const arrivalDelay = differenceSeconds(estimatedAt, schedule?.planned_end_at)
     const departureDelay = differenceSeconds(schedule?.actual_start_at, schedule?.planned_start_at)
     const status = operationalStatus(arrivalDelay)
+    const alerts = buildVehicleAlerts(vehicle, now)
     return {
       vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay,
-      status: status.label, statusKey: status.key,
+      status: status.label, statusKey: status.key, alerts,
     }
-  }).filter(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status }) => {
+  }).filter(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status, alerts }) => {
     const values: Record<FilterKey, unknown> = {
       vehicle: vehicle.vehicle_prefix,
       line: schedule?.line ?? vehicle.route_short_name ?? vehicle.current_line,
@@ -170,7 +179,8 @@ export function FleetTable({
       plannedStart: formatClock(schedule?.planned_start_at),
       actualStart: formatClock(schedule?.actual_start_at),
       plannedEnd: formatClock(schedule?.planned_end_at), eta: formatClock(estimatedAt),
-      arrivalDelay: signedMinutes(arrivalDelay), departureDelay: signedMinutes(departureDelay), status,
+      arrivalDelay: signedMinutes(arrivalDelay), departureDelay: signedMinutes(departureDelay),
+      status: `${status} ${alerts.stale ? 'Sem atualização' : ''} ${alerts.lowSpeed ? 'Abaixo de 1 km/h por 5 min' : ''}`,
       speed: vehicle.speed_kmh == null ? '' : Math.round(vehicle.speed_kmh),
       confidence: formatPercent(eta?.current_time.service.trip_end.reliability ?? 0),
       updated: formatClock(vehicle.source_timestamp),
@@ -178,7 +188,7 @@ export function FleetTable({
     return (Object.keys(filters) as FilterKey[]).every((key) => matches(values[key], filters[key]))
   }).sort((first, second) => {
     return compareSortValues(sortValue(first, sort.key), sortValue(second, sort.key), sort.direction)
-  }), [etaByVehicle, filters, positions, scheduleByVehicle, sort])
+  }), [etaByVehicle, filters, now, positions, scheduleByVehicle, sort])
 
   const setFilter = (key: FilterKey, value: string) => setFilters((current) => ({ ...current, [key]: value }))
   const hasFilters = Object.values(filters).some(Boolean)
@@ -220,10 +230,10 @@ export function FleetTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status, statusKey }) => {
+            {rows.map(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status, statusKey, alerts }) => {
               const confidence = eta?.current_time.service.trip_end.reliability ?? 0
               return (
-                <tr key={vehicle.vehicle_prefix} className={`fleet-status-row ${statusKey}`}>
+                <tr key={vehicle.vehicle_prefix} className={`fleet-status-row ${statusKey} ${alerts.stale ? 'stale-alert' : ''} ${alerts.lowSpeed ? 'low-speed-alert' : ''}`}>
                   <td><strong className="vehicle-cell"><BusFront size={15} /> {vehicle.vehicle_prefix}</strong></td>
                   <td><span className="line-chip">{schedule?.line ?? vehicle.route_short_name ?? vehicle.current_line ?? '—'}</span></td>
                   <td>{schedule?.direction ?? vehicle.direction_id ?? '—'}</td><td>{schedule?.schedule_table ?? '—'}</td>
@@ -232,7 +242,7 @@ export function FleetTable({
                   <td>{formatClock(schedule?.planned_start_at)}</td><td>{formatClock(schedule?.actual_start_at)}</td><td>{formatClock(schedule?.planned_end_at)}</td>
                   <td><strong>{formatClock(estimatedAt)}</strong></td>
                   <td><span className={`delay-value ${arrivalDelay != null && arrivalDelay > 0 ? 'baseline' : 'proposed'}`}>{signedMinutes(arrivalDelay)}</span></td>
-                  <td>{signedMinutes(departureDelay)}</td><td><span className={`operation-status ${statusKey}`}>{status}</span></td>
+                  <td>{signedMinutes(departureDelay)}</td><td><span className={`operation-status ${statusKey}`}>{status}</span>{alerts.stale && <small className="vehicle-alert-badge stale">Sem atualização há {formatMinutes(alerts.sourceAgeSeconds)}</small>}{alerts.lowSpeed && <small className="vehicle-alert-badge low-speed">Abaixo de 1 km/h há {formatMinutes(alerts.lowSpeedDurationSeconds)}</small>}</td>
                   <td>{vehicle.speed_kmh == null ? '—' : `${Math.round(vehicle.speed_kmh)} km/h`}</td>
                   <td><span className={`quality-badge ${vehicle.projection_quality}`}>{formatPercent(confidence)}</span><small>{sourceLabel(eta)}</small></td>
                   <td>{formatClock(vehicle.source_timestamp)}</td>

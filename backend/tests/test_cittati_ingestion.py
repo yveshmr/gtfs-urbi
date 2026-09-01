@@ -209,6 +209,21 @@ def test_parse_vehicle_batch_rejects_rows_without_a_stable_prefix() -> None:
     assert batch.rejected_count == 1
 
 
+def test_parse_vehicle_batch_starts_low_speed_timer_on_first_observation() -> None:
+    received_at = datetime(2026, 8, 28, 13, 1, tzinfo=UTC)
+    batch = parse_vehicle_batch(
+        {
+            "campos": ["Prefixo", "DataHora", "Velocidade"],
+            "dados": [["001", "28/08/2026 10:00:00", "0,5"]],
+        },
+        ingestion_run_id=uuid.uuid4(),
+        payload_hash="e" * 64,
+        received_at=received_at,
+    )
+
+    assert batch.rows[0]["low_speed_since"] == datetime(2026, 8, 28, 13, 0, tzinfo=UTC)
+
+
 def test_exact_trip_match_enriches_current_state_for_projection() -> None:
     feed_id = uuid.uuid4()
     batch = parse_vehicle_batch(

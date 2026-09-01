@@ -7,6 +7,7 @@ export interface ProjectedVehiclePosition {
   position_source: 'projected'
   gps_direction: number | null
   speed_kmh: number | null
+  low_speed_since: string | null
   current_line: string | null
   trip_id: string
   route_id: string
@@ -172,18 +173,25 @@ export interface ExchangeGroup {
   steps: SwapAssignment[]
 }
 
-export interface SwapExecution {
+export type PersistedSwapDecisionStatus = 'in_analysis' | 'claimed' | 'executed' | 'rejected'
+export type SwapDecisionStatus = 'new' | PersistedSwapDecisionStatus | 'expired'
+
+export interface SwapDecision {
   execution_key: string
   group_id: string
   terminal_id: string
   snapshot_generated_at: string
-  executed_at: string
-  executed_by: string
+  status: PersistedSwapDecisionStatus
+  updated_at: string
+  updated_by: string
+  rejection_reason: string | null
+  executed_at: string | null
+  executed_by: string | null
 }
 
-export interface SwapExecutionList {
+export interface SwapDecisionList {
   count: number
-  executions: SwapExecution[]
+  decisions: SwapDecision[]
 }
 
 export interface TerminalSwapPlan {

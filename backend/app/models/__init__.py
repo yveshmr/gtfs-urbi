@@ -12,7 +12,7 @@ from app.models.gtfs_static import (
     GtfsTrip,
 )
 from app.models.ingestion import ApiResponse, IngestionRun
-from app.models.prescription import VehicleSwapExecution
+from app.models.prescription import VehicleSwapDecision, VehicleSwapDecisionEvent
 from app.models.segment_metrics import (
     SegmentCompletionObservation,
     SegmentDailyMetric5m,
@@ -43,5 +43,6 @@ __all__ = [
     "SegmentProfileRefreshState",
     "VehicleCurrentState",
     "VehicleEtaSnapshot",
-    "VehicleSwapExecution",
+    "VehicleSwapDecision",
+    "VehicleSwapDecisionEvent",
 ]

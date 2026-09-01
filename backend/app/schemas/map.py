@@ -13,6 +13,7 @@ class ProjectedVehiclePositionResponse(BaseModel):
     position_source: Literal["projected"] = "projected"
     gps_direction: float | None
     speed_kmh: float | None
+    low_speed_since: datetime | None
     current_line: str | None
     trip_id: str
     route_id: str

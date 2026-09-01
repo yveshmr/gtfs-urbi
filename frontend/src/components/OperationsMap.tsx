@@ -16,6 +16,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import type { ProjectedVehiclePosition, TripGeometry } from '../types'
 import { sliceLineBetweenFractions, splitLineAtFraction } from '../utils/geometry'
 import type { VehicleOperationalStatus } from '../utils/operationalStatus'
+import type { VehicleAlerts } from '../utils/vehicleAlerts'
 
 setWorkerUrl(workerUrl)
 
@@ -24,6 +25,7 @@ interface OperationsMapProps {
   selectedVehicle: ProjectedVehiclePosition | null
   tripGeometry: TripGeometry | null
   operationalStatusByVehicle: Map<string, VehicleOperationalStatus>
+  alertsByVehicle: Map<string, VehicleAlerts>
   onSelectVehicle: (vehiclePrefix: string) => void
 }
 
@@ -137,8 +139,10 @@ const NEUTRAL_STYLE: StyleSpecification = {
           'on_time', '#009CDF',
           ['case', ['==', ['get', 'quality'], 'valid'], '#009CDF', '#F2C94C'],
         ],
-        'circle-stroke-color': '#FFFFFF',
-        'circle-stroke-width': 2,
+        'circle-stroke-color': [
+          'case', ['get', 'stale'], '#6B7280', ['get', 'lowSpeed'], '#F2994A', '#FFFFFF',
+        ],
+        'circle-stroke-width': ['case', ['any', ['get', 'stale'], ['get', 'lowSpeed']], 4, 2],
         'circle-opacity': 0.94,
       },
     },
@@ -155,8 +159,10 @@ const NEUTRAL_STYLE: StyleSpecification = {
           'on_time', '#009CDF',
           ['case', ['==', ['get', 'quality'], 'valid'], '#009CDF', '#F2C94C'],
         ],
-        'circle-stroke-color': '#003B5C',
-        'circle-stroke-width': 3,
+        'circle-stroke-color': [
+          'case', ['get', 'stale'], '#6B7280', ['get', 'lowSpeed'], '#F2994A', '#003B5C',
+        ],
+        'circle-stroke-width': ['case', ['any', ['get', 'stale'], ['get', 'lowSpeed']], 5, 3],
       },
     },
   ],
@@ -165,23 +171,29 @@ const NEUTRAL_STYLE: StyleSpecification = {
 function fleetCollection(
   vehicles: ProjectedVehiclePosition[],
   operationalStatusByVehicle: Map<string, VehicleOperationalStatus>,
+  alertsByVehicle: Map<string, VehicleAlerts>,
 ): FeatureCollection<Point> {
   return {
     type: 'FeatureCollection',
-    features: vehicles.map((vehicle) => ({
-      type: 'Feature',
-      id: vehicle.vehicle_prefix,
-      geometry: {
-        type: 'Point',
-        coordinates: [vehicle.longitude, vehicle.latitude],
-      },
-      properties: {
-        vehiclePrefix: vehicle.vehicle_prefix,
-        line: vehicle.route_short_name ?? vehicle.current_line ?? 'Sem linha',
-        quality: vehicle.projection_quality,
-        delayStatus: operationalStatusByVehicle.get(vehicle.vehicle_prefix)?.status ?? 'no_reference',
-      },
-    })),
+    features: vehicles.map((vehicle) => {
+      const alerts = alertsByVehicle.get(vehicle.vehicle_prefix)
+      return {
+        type: 'Feature',
+        id: vehicle.vehicle_prefix,
+        geometry: {
+          type: 'Point',
+          coordinates: [vehicle.longitude, vehicle.latitude],
+        },
+        properties: {
+          vehiclePrefix: vehicle.vehicle_prefix,
+          line: vehicle.route_short_name ?? vehicle.current_line ?? 'Sem linha',
+          quality: vehicle.projection_quality,
+          delayStatus: operationalStatusByVehicle.get(vehicle.vehicle_prefix)?.status ?? 'no_reference',
+          stale: alerts?.stale ?? false,
+          lowSpeed: alerts?.lowSpeed ?? false,
+        },
+      }
+    }),
   }
 }
 
@@ -224,6 +236,7 @@ export function OperationsMap({
   selectedVehicle,
   tripGeometry,
   operationalStatusByVehicle,
+  alertsByVehicle,
   onSelectVehicle,
 }: OperationsMapProps) {
   const container = useRef<HTMLDivElement | null>(null)
@@ -317,12 +330,15 @@ export function OperationsMap({
     updateSource(
       map.current,
       'fleet-vehicles',
-      fleetCollection(vehicles, operationalStatusByVehicle),
+      fleetCollection(vehicles, operationalStatusByVehicle, alertsByVehicle),
     )
-  }, [operationalStatusByVehicle, ready, styleRevision, vehicles])
+  }, [alertsByVehicle, operationalStatusByVehicle, ready, styleRevision, vehicles])
 
   useEffect(() => {
     if (!ready || !map.current) return
+    const selectedAlerts = selectedVehicle
+      ? alertsByVehicle.get(selectedVehicle.vehicle_prefix)
+      : undefined
     const point: FeatureCollection<Point> = selectedVehicle
       ? {
           type: 'FeatureCollection',
@@ -338,13 +354,15 @@ export function OperationsMap({
                 delayStatus:
                   operationalStatusByVehicle.get(selectedVehicle.vehicle_prefix)?.status ??
                   'no_reference',
+                stale: selectedAlerts?.stale ?? false,
+                lowSpeed: selectedAlerts?.lowSpeed ?? false,
               },
             },
           ],
         }
       : { type: 'FeatureCollection', features: [] }
     updateSource(map.current, 'selected-vehicle', point)
-  }, [operationalStatusByVehicle, ready, selectedVehicle, styleRevision])
+  }, [alertsByVehicle, operationalStatusByVehicle, ready, selectedVehicle, styleRevision])
 
   useEffect(() => {
     if (!ready || !map.current || !tripGeometry || !selectedVehicle) {

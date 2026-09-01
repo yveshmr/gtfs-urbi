@@ -15,7 +15,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 
 import type {
   ProjectedVehiclePosition,
-  SwapExecution,
+  SwapDecision,
   VehicleScheduleContext,
   VehicleSwapPrescription,
 } from '../types'
@@ -24,13 +24,15 @@ import type {
   VehicleDelayStatus,
   VehicleOperationalStatus,
 } from '../utils/operationalStatus'
+import type { VehicleAlerts } from '../utils/vehicleAlerts'
 
 interface OverviewDashboardProps {
   vehicles: ProjectedVehiclePosition[]
   statusByVehicle: Map<string, VehicleOperationalStatus>
+  alertsByVehicle: Map<string, VehicleAlerts>
   scheduleByVehicle: Map<string, VehicleScheduleContext>
   prescription: VehicleSwapPrescription | null
-  executions: SwapExecution[]
+  decisions: SwapDecision[]
   generatedAt?: string | null
   map: ReactNode
   onOpenVehicle: (vehiclePrefix: string) => void
@@ -54,9 +56,10 @@ function minutesSigned(seconds: number | null) {
 export function OverviewDashboard({
   vehicles,
   statusByVehicle,
+  alertsByVehicle,
   scheduleByVehicle,
   prescription,
-  executions,
+  decisions,
   generatedAt,
   map,
   onOpenVehicle,
@@ -94,6 +97,8 @@ export function OverviewDashboard({
   ), [filteredVehicles, statusByVehicle])
   const referenceCount = filteredVehicles.length - statusCounts.no_reference
   const punctuality = referenceCount ? statusCounts.on_time / referenceCount : 0
+  const staleCount = filteredVehicles.filter((vehicle) => alertsByVehicle.get(vehicle.vehicle_prefix)?.stale).length
+  const lowSpeedCount = filteredVehicles.filter((vehicle) => alertsByVehicle.get(vehicle.vehicle_prefix)?.lowSpeed).length
 
   const priorities = useMemo(() => filteredVehicles
     .map((vehicle) => ({ vehicle, status: statusByVehicle.get(vehicle.vehicle_prefix) }))
@@ -117,9 +122,11 @@ export function OverviewDashboard({
     return [...aggregate.entries()].sort((a, b) => b[1].totalDelay - a[1].totalDelay).slice(0, 5)
   }, [filteredVehicles, scheduleByVehicle, statusByVehicle])
 
-  const executionKeys = useMemo(() => new Set(executions.map((item) => item.execution_key)), [executions])
+  const finalDecisionKeys = useMemo(() => new Set(decisions
+    .filter((item) => item.status === 'executed' || item.status === 'rejected')
+    .map((item) => item.execution_key)), [decisions])
   const groups = useMemo(() => (prescription?.plans ?? []).flatMap((plan) => plan.exchange_groups), [prescription])
-  const pendingGroups = groups.filter((group) => !executionKeys.has(group.execution_key))
+  const pendingGroups = groups.filter((group) => !finalDecisionKeys.has(group.execution_key))
   const threatenedTrips = (prescription?.plans ?? []).reduce((total, plan) =>
     total + plan.assignments.filter((item) => item.baseline_delay_seconds > 10 * 60).length, 0)
   const baselineDelay = (prescription?.plans ?? []).reduce(
@@ -146,6 +153,13 @@ export function OverviewDashboard({
         <label>Situação<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as VehicleDelayStatus | '')}><option value="">Todas</option>{Object.entries(STATUS_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         {hasFleetFilters && <button onClick={() => { setLineFilter(''); setTerminalFilter(''); setStatusFilter('') }}>Limpar</button>}
       </div>
+
+      {(staleCount > 0 || lowSpeedCount > 0) && <div className="overview-alert-strip" role="status" aria-label="Alertas operacionais da frota">
+        <AlertTriangle size={18} />
+        <div><strong>Alertas que exigem verificação</strong><small>Condições mantidas por mais de cinco minutos</small></div>
+        {staleCount > 0 && <button className="stale" onClick={() => onOpenFleet('Sem atualização')}><DatabaseZap size={15} /><span><strong>{staleCount}</strong> sem atualização</span></button>}
+        {lowSpeedCount > 0 && <button className="low-speed" onClick={() => onOpenFleet('Abaixo de 1 km/h')}><Clock3 size={15} /><span><strong>{lowSpeedCount}</strong> abaixo de 1 km/h</span></button>}
+      </div>}
 
       <div className="manager-kpi-grid">
         <button className="manager-kpi blue" onClick={() => onOpenFleet()}><BusFront size={19} /><span>Frota monitorada<strong>{filteredVehicles.length}</strong><small>{vehicles.length} veículos no total</small></span></button>

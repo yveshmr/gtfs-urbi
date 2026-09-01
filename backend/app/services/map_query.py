@@ -37,6 +37,7 @@ async def query_projected_vehicle_positions(
                 ST_X(vehicle.projected_location) AS longitude,
                 vehicle.gps_direction,
                 vehicle.speed_kmh,
+                vehicle.low_speed_since,
                 vehicle.current_line,
                 vehicle.trip_id,
                 vehicle.route_id,

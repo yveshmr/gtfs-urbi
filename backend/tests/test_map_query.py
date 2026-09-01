@@ -46,6 +46,7 @@ def projected_vehicle_row() -> dict[str, object]:
         "longitude": -48.0,
         "gps_direction": 90.0,
         "speed_kmh": 35.0,
+        "low_speed_since": None,
         "current_line": "100",
         "trip_id": "trip-1",
         "route_id": "route-1",

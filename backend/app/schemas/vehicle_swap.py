@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SwapAssignmentResponse(BaseModel):
@@ -71,15 +71,34 @@ class ExecuteExchangeGroupRequest(BaseModel):
     executed_by: str = Field(min_length=1, max_length=100)
 
 
-class SwapExecutionResponse(BaseModel):
+class UpdateExchangeGroupDecisionRequest(BaseModel):
+    execution_key: str = Field(min_length=64, max_length=64)
+    status: Literal["in_analysis", "claimed", "executed", "rejected"]
+    updated_by: str = Field(min_length=1, max_length=100)
+    rejection_reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_rejection_reason(self) -> "UpdateExchangeGroupDecisionRequest":
+        if self.status == "rejected" and not (self.rejection_reason or "").strip():
+            raise ValueError("A rejection reason is required for rejected groups.")
+        if self.status != "rejected" and self.rejection_reason is not None:
+            raise ValueError("A rejection reason is only accepted for rejected groups.")
+        return self
+
+
+class SwapDecisionResponse(BaseModel):
     execution_key: str
     group_id: str
     terminal_id: str
     snapshot_generated_at: datetime
-    executed_at: datetime
-    executed_by: str
+    status: Literal["in_analysis", "claimed", "executed", "rejected"]
+    updated_at: datetime
+    updated_by: str
+    rejection_reason: str | None
+    executed_at: datetime | None = None
+    executed_by: str | None = None
 
 
-class SwapExecutionListResponse(BaseModel):
+class SwapDecisionListResponse(BaseModel):
     count: int
-    executions: list[SwapExecutionResponse]
+    decisions: list[SwapDecisionResponse]

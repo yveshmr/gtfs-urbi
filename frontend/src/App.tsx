@@ -20,9 +20,11 @@ import {
   getVehicleEta,
   getVehicleEtaSnapshots,
   getVehicleScheduleContexts,
-  getVehicleSwapExecutions,
+  getVehicleSwapDecisions,
   getVehicleSwapPrescriptions,
 } from './api'
+import gipeLogo from './assets/gipe-logo.png'
+import urbiLogo from './assets/urbi-logo-light.png'
 import { FleetTable } from './components/FleetTable'
 import { OverviewDashboard } from './components/OverviewDashboard'
 import { PrescriptionsTable } from './components/PrescriptionsTable'
@@ -35,10 +37,11 @@ import type {
   VehicleEtaSnapshotList,
   VehicleScheduleContextList,
   VehicleSwapPrescription,
-  SwapExecution,
+  SwapDecision,
 } from './types'
 import { formatClock } from './utils/format'
 import { buildVehicleOperationalStatus } from './utils/operationalStatus'
+import { buildVehicleAlerts } from './utils/vehicleAlerts'
 
 const OperationsMap = lazy(() =>
   import('./components/OperationsMap').then((module) => ({ default: module.OperationsMap })),
@@ -63,9 +66,15 @@ function App() {
   const [etaSnapshots, setEtaSnapshots] = useState<VehicleEtaSnapshotList | null>(null)
   const [scheduleContexts, setScheduleContexts] = useState<VehicleScheduleContextList | null>(null)
   const [prescription, setPrescription] = useState<VehicleSwapPrescription | null>(null)
-  const [swapExecutions, setSwapExecutions] = useState<SwapExecution[]>([])
+  const [swapDecisions, setSwapDecisions] = useState<SwapDecision[]>([])
   const [fleetPresetStatus, setFleetPresetStatus] = useState<string | null>(null)
   const [fleetPresetToken, setFleetPresetToken] = useState(0)
+  const [alertNow, setAlertNow] = useState(Date.now())
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setAlertNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const vehicles = data?.vehicles ?? []
   const liveSelectedVehicle = useMemo(
@@ -104,6 +113,19 @@ function App() {
   const selectedSchedule = selectedVehicle
     ? scheduleByVehicle.get(selectedVehicle.vehicle_prefix) ?? null
     : null
+  const alertsByVehicle = useMemo(
+    () => new Map(vehicles.map((vehicle) => [
+      vehicle.vehicle_prefix,
+      buildVehicleAlerts(vehicle, alertNow),
+    ])),
+    [alertNow, vehicles],
+  )
+  const selectedAlerts = selectedVehicle
+    ? alertsByVehicle.get(selectedVehicle.vehicle_prefix)
+    : undefined
+  const operationalAlertCount = [...alertsByVehicle.values()].filter(
+    (alerts) => alerts.stale || alerts.lowSpeed,
+  ).length
   const searchResults = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('pt-BR')
     if (!normalized) return []
@@ -123,13 +145,13 @@ function App() {
         getVehicleEtaSnapshots(controller.signal),
         getVehicleScheduleContexts(controller.signal),
         getVehicleSwapPrescriptions(controller.signal),
-        getVehicleSwapExecutions(controller.signal),
+        getVehicleSwapDecisions(controller.signal),
       ])
       if (controller.signal.aborted) return
       if (etaResult.status === 'fulfilled') setEtaSnapshots(etaResult.value)
       if (scheduleResult.status === 'fulfilled') setScheduleContexts(scheduleResult.value)
       if (prescriptionResult.status === 'fulfilled') setPrescription(prescriptionResult.value)
-      if (executionResult.status === 'fulfilled') setSwapExecutions(executionResult.value.executions)
+      if (executionResult.status === 'fulfilled') setSwapDecisions(executionResult.value.decisions)
     }
     void loadOperationalReferences()
     const timer = window.setInterval(() => void loadOperationalReferences(), 30_000)
@@ -230,7 +252,8 @@ function App() {
           <Menu size={22} />
         </button>
         <div className="brand-lockup">
-          <span className="brand-wordmark">Urbi</span>
+          <img className="brand-urbi-logo" src={urbiLogo} alt="Urbi" />
+          <span className="powered-brand"><small>powered by</small><img src={gipeLogo} alt="GIPE" /></span>
           <span className="brand-divider" />
           <span className="brand-product">Operação em tempo real</span>
         </div>
@@ -240,7 +263,7 @@ function App() {
         <div className="topbar-status">
           <span className="live-dot" /> Dados atualizados às {formatClock(data?.generated_at)}
         </div>
-        <button className="topbar-icon" aria-label="Notificações"><Bell size={19} /></button>
+        <button className="topbar-icon notification-button" aria-label={`${operationalAlertCount} alertas operacionais`}><Bell size={19} />{operationalAlertCount > 0 && <span>{operationalAlertCount}</span>}</button>
         <div className="user-chip">CCO</div>
       </header>
 
@@ -291,9 +314,10 @@ function App() {
           <OverviewDashboard
             vehicles={vehicles}
             statusByVehicle={operationalStatusByVehicle}
+            alertsByVehicle={alertsByVehicle}
             scheduleByVehicle={scheduleByVehicle}
             prescription={prescription}
-            executions={swapExecutions}
+            decisions={swapDecisions}
             generatedAt={data?.generated_at}
             onOpenVehicle={openVehicleOnMap}
             onOpenFleet={openFleet}
@@ -305,6 +329,7 @@ function App() {
                   selectedVehicle={null}
                   tripGeometry={null}
                   operationalStatusByVehicle={operationalStatusByVehicle}
+                  alertsByVehicle={alertsByVehicle}
                   onSelectVehicle={openVehicleOnMap}
                 />
               </Suspense>
@@ -339,6 +364,8 @@ function App() {
               <span><i className="legend-dot warning" /> Até 10 min</span>
               <span><i className="legend-dot delayed" /> Acima de 10 min</span>
               <span><i className="legend-dot reduced" /> Sem referência</span>
+              <span><i className="legend-ring stale" /> Sem atualização</span>
+              <span><i className="legend-ring low-speed" /> Abaixo de 1 km/h</span>
               <span><i className="legend-line current" /> Trecho atual</span>
             </div>
           </div>
@@ -349,6 +376,7 @@ function App() {
               selectedVehicle={selectedVehicle}
               tripGeometry={geometry}
               operationalStatusByVehicle={operationalStatusByVehicle}
+              alertsByVehicle={alertsByVehicle}
               onSelectVehicle={selectVehicle}
             />
           </Suspense>
@@ -361,6 +389,7 @@ function App() {
               eta={eta}
               schedule={selectedSchedule}
               operationalStatus={selectedOperationalStatus}
+              alerts={selectedAlerts}
               loading={detailLoading}
               error={detailError}
               onClose={clearSelectedVehicle}

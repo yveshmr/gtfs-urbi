@@ -55,6 +55,10 @@ def test_confirm_vehicle_swap_execution(monkeypatch) -> None:
             "group_id": "terminal-G01",
             "terminal_id": "terminal",
             "snapshot_generated_at": executed_at,
+            "status": "executed",
+            "updated_at": executed_at,
+            "updated_by": "Operador 1",
+            "rejection_reason": None,
             "executed_at": executed_at,
             "executed_by": "Operador 1",
         }
@@ -71,3 +75,38 @@ def test_confirm_vehicle_swap_execution(monkeypatch) -> None:
 
     assert response.status_code == 201
     assert response.json()["executed_by"] == "Operador 1"
+
+
+def test_reject_vehicle_swap_group_with_reason(monkeypatch) -> None:
+    decided_at = datetime(2026, 8, 31, 15, tzinfo=UTC)
+    update = AsyncMock(
+        return_value={
+            "execution_key": "b" * 64,
+            "group_id": "terminal-G02",
+            "terminal_id": "terminal",
+            "snapshot_generated_at": decided_at,
+            "status": "rejected",
+            "updated_at": decided_at,
+            "updated_by": "Operador 2",
+            "rejection_reason": "Veículo indisponível",
+            "executed_at": None,
+            "executed_by": None,
+        }
+    )
+    monkeypatch.setattr(prescriptions_module, "update_exchange_group_decision", update)
+    app.dependency_overrides[get_database_session] = fake_session
+    try:
+        response = client.post(
+            "/api/v1/prescriptions/vehicle-swap-decisions",
+            json={
+                "execution_key": "b" * 64,
+                "status": "rejected",
+                "updated_by": "Operador 2",
+                "rejection_reason": "Veículo indisponível",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"

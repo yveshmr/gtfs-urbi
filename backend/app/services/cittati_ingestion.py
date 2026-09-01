@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, func, or_, text
+from sqlalchemy import and_, case, func, or_, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -217,6 +217,11 @@ def parse_vehicle_batch(
             ),
             "gps_direction": _float(source_data.get("GPS_Direcao")),
             "speed_kmh": speed_kmh,
+            "low_speed_since": (
+                source_timestamp or received_at
+                if speed_kmh is not None and speed_kmh < 1
+                else None
+            ),
             "current_line": _text(source_data.get("Linha_atual")),
             "normalized_current_line": normalize_model4_line(_text(source_data.get("Linha_atual"))),
             "current_planned_time": _text(source_data.get("HoraViagemPlanejada_atual")),
@@ -360,6 +365,7 @@ async def _upsert_current_states(
         "previous_state_2",
         "position_sample_count",
         "map_match_status",
+        "low_speed_since",
         "last_boundary_stop_id",
         "last_boundary_stop_sequence",
         "last_boundary_progress_m",
@@ -387,6 +393,37 @@ async def _upsert_current_states(
                 else_=func.least(VehicleCurrentState.position_sample_count + 1, 3),
             ),
             "map_match_status": "collecting",
+            "low_speed_since": case(
+                (
+                    or_(
+                        statement.excluded.speed_kmh.is_(None),
+                        statement.excluded.speed_kmh >= 1,
+                    ),
+                    None,
+                ),
+                (
+                    window_must_reset,
+                    func.coalesce(
+                        statement.excluded.source_timestamp,
+                        statement.excluded.received_at,
+                    ),
+                ),
+                (
+                    and_(
+                        VehicleCurrentState.speed_kmh.is_not(None),
+                        VehicleCurrentState.speed_kmh < 1,
+                    ),
+                    func.coalesce(
+                        VehicleCurrentState.low_speed_since,
+                        VehicleCurrentState.source_timestamp,
+                        VehicleCurrentState.received_at,
+                    ),
+                ),
+                else_=func.coalesce(
+                    statement.excluded.source_timestamp,
+                    statement.excluded.received_at,
+                ),
+            ),
             "last_boundary_stop_id": case(
                 (window_must_reset, None),
                 else_=VehicleCurrentState.last_boundary_stop_id,

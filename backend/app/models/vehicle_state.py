@@ -93,6 +93,7 @@ class VehicleCurrentState(Base):
     )
     gps_direction: Mapped[float | None] = mapped_column(Float)
     speed_kmh: Mapped[float | None] = mapped_column(Float)
+    low_speed_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     current_line: Mapped[str | None] = mapped_column(String(100))
     normalized_current_line: Mapped[str | None] = mapped_column(String(100))

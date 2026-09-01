@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   ArrowRight,
   BusFront,
   CircleGauge,
@@ -23,6 +24,7 @@ import {
   formatPercent,
 } from '../utils/format'
 import type { VehicleOperationalStatus } from '../utils/operationalStatus'
+import type { VehicleAlerts } from '../utils/vehicleAlerts'
 
 interface VehicleDetailsProps {
   vehicle: ProjectedVehiclePosition
@@ -30,6 +32,7 @@ interface VehicleDetailsProps {
   eta: VehicleEta | null
   schedule: VehicleScheduleContext | null
   operationalStatus?: VehicleOperationalStatus
+  alerts?: VehicleAlerts
   loading: boolean
   error: string | null
   onClose: () => void
@@ -70,6 +73,7 @@ export function VehicleDetails({
   eta,
   schedule,
   operationalStatus,
+  alerts,
   loading,
   error,
   onClose,
@@ -118,6 +122,11 @@ export function VehicleDetails({
         <div><MapPin size={17} /><span>Distância do shape</span><strong>{formatDistance(vehicle.distance_to_shape_m)}</strong></div>
         <div><CircleGauge size={17} /><span>Projeção</span><strong>{vehicle.projection_quality === 'valid' ? 'Válida' : 'Reduzida'}</strong></div>
       </div>
+
+      {(alerts?.stale || alerts?.lowSpeed) && <section className="vehicle-operational-alerts" aria-label="Alertas do veículo">
+        {alerts.stale && <div className="stale"><AlertCircle size={16} /><span><strong>Sem atualização</strong><small>Último dado há {formatMinutes(alerts.sourceAgeSeconds)}</small></span></div>}
+        {alerts.lowSpeed && <div className="low-speed"><Gauge size={16} /><span><strong>Abaixo de 1 km/h</strong><small>Condição mantida há {formatMinutes(alerts.lowSpeedDurationSeconds)}</small></span></div>}
+      </section>}
 
       <section className="current-segment-card">
         <div className="section-title"><span className="orange-dot" />Trecho atual</div>

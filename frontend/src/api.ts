@@ -5,8 +5,9 @@ import type {
   VehicleEtaSnapshotList,
   VehicleScheduleContextList,
   VehicleSwapPrescription,
-  SwapExecution,
-  SwapExecutionList,
+  PersistedSwapDecisionStatus,
+  SwapDecision,
+  SwapDecisionList,
 } from './types'
 
 export class ApiError extends Error {
@@ -73,8 +74,27 @@ export function getVehicleSwapPrescriptions(signal?: AbortSignal) {
   return request<VehicleSwapPrescription>('/api/v1/prescriptions/vehicle-swaps', signal)
 }
 
-export function getVehicleSwapExecutions(signal?: AbortSignal) {
-  return request<SwapExecutionList>('/api/v1/prescriptions/vehicle-swap-executions', signal)
+export function getVehicleSwapDecisions(signal?: AbortSignal) {
+  return request<SwapDecisionList>('/api/v1/prescriptions/vehicle-swap-decisions', signal)
+}
+
+export function updateVehicleSwapDecision(
+  executionKey: string,
+  status: PersistedSwapDecisionStatus,
+  updatedBy: string,
+  rejectionReason?: string,
+  signal?: AbortSignal,
+) {
+  return request<SwapDecision>('/api/v1/prescriptions/vehicle-swap-decisions', signal, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      execution_key: executionKey,
+      status,
+      updated_by: updatedBy,
+      rejection_reason: rejectionReason,
+    }),
+  })
 }
 
 export function confirmVehicleSwapExecution(
@@ -82,9 +102,5 @@ export function confirmVehicleSwapExecution(
   executedBy: string,
   signal?: AbortSignal,
 ) {
-  return request<SwapExecution>('/api/v1/prescriptions/vehicle-swap-executions', signal, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ execution_key: executionKey, executed_by: executedBy }),
-  })
+  return updateVehicleSwapDecision(executionKey, 'executed', executedBy, undefined, signal)
 }
