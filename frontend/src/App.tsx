@@ -20,8 +20,11 @@ import {
   getVehicleEta,
   getVehicleEtaSnapshots,
   getVehicleScheduleContexts,
+  getVehicleSwapExecutions,
+  getVehicleSwapPrescriptions,
 } from './api'
 import { FleetTable } from './components/FleetTable'
+import { OverviewDashboard } from './components/OverviewDashboard'
 import { PrescriptionsTable } from './components/PrescriptionsTable'
 import { VehicleDetails } from './components/VehicleDetails'
 import { useFleetPositions } from './hooks/useFleetPositions'
@@ -31,6 +34,8 @@ import type {
   VehicleEta,
   VehicleEtaSnapshotList,
   VehicleScheduleContextList,
+  VehicleSwapPrescription,
+  SwapExecution,
 } from './types'
 import { formatClock } from './utils/format'
 import { buildVehicleOperationalStatus } from './utils/operationalStatus'
@@ -47,7 +52,7 @@ function App() {
     window.sessionStorage.getItem('gtfs-on-time-selected-vehicle'),
   )
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [activeView, setActiveView] = useState<ActiveView>('map')
+  const [activeView, setActiveView] = useState<ActiveView>('overview')
   const [viewRefreshToken, setViewRefreshToken] = useState(0)
   const selectedVehicleSnapshot = useRef<ProjectedVehiclePosition | null>(null)
   const [geometry, setGeometry] = useState<TripGeometry | null>(null)
@@ -57,6 +62,10 @@ function App() {
   const [query, setQuery] = useState('')
   const [etaSnapshots, setEtaSnapshots] = useState<VehicleEtaSnapshotList | null>(null)
   const [scheduleContexts, setScheduleContexts] = useState<VehicleScheduleContextList | null>(null)
+  const [prescription, setPrescription] = useState<VehicleSwapPrescription | null>(null)
+  const [swapExecutions, setSwapExecutions] = useState<SwapExecution[]>([])
+  const [fleetPresetStatus, setFleetPresetStatus] = useState<string | null>(null)
+  const [fleetPresetToken, setFleetPresetToken] = useState(0)
 
   const vehicles = data?.vehicles ?? []
   const liveSelectedVehicle = useMemo(
@@ -110,13 +119,17 @@ function App() {
   useEffect(() => {
     const controller = new AbortController()
     const loadOperationalReferences = async () => {
-      const [etaResult, scheduleResult] = await Promise.allSettled([
+      const [etaResult, scheduleResult, prescriptionResult, executionResult] = await Promise.allSettled([
         getVehicleEtaSnapshots(controller.signal),
         getVehicleScheduleContexts(controller.signal),
+        getVehicleSwapPrescriptions(controller.signal),
+        getVehicleSwapExecutions(controller.signal),
       ])
       if (controller.signal.aborted) return
       if (etaResult.status === 'fulfilled') setEtaSnapshots(etaResult.value)
       if (scheduleResult.status === 'fulfilled') setScheduleContexts(scheduleResult.value)
+      if (prescriptionResult.status === 'fulfilled') setPrescription(prescriptionResult.value)
+      if (executionResult.status === 'fulfilled') setSwapExecutions(executionResult.value.executions)
     }
     void loadOperationalReferences()
     const timer = window.setInterval(() => void loadOperationalReferences(), 30_000)
@@ -185,6 +198,12 @@ function App() {
     setActiveView('map')
   }
 
+  const openFleet = (status?: string) => {
+    setFleetPresetStatus(status ?? null)
+    setFleetPresetToken((token) => token + 1)
+    setActiveView('fleet')
+  }
+
   const refreshCurrentView = () => {
     void refresh()
     setViewRefreshToken((token) => token + 1)
@@ -249,7 +268,7 @@ function App() {
           </button>
         </div>
 
-        {(activeView === 'overview' || activeView === 'map') && <section className="kpi-strip" aria-label="Indicadores da frota">
+        {activeView === 'map' && <section className="kpi-strip" aria-label="Indicadores da frota">
           <article className="kpi-card blue">
             <div className="kpi-icon"><BusFront size={21} /></div>
             <div><span>Veículos projetados</span><strong>{data?.count ?? '—'}</strong><small>map matching resolvido</small></div>
@@ -269,17 +288,28 @@ function App() {
         </section>}
 
         {activeView === 'overview' && (
-          <section className="overview-grid">
-            <button onClick={() => setActiveView('map')}>
-              <MapPinned size={25} /><span><strong>Mapa operacional</strong><small>Acompanhar posições, rotas e ETAs em tempo real</small></span><ChevronRight size={19} />
-            </button>
-            <button onClick={() => setActiveView('fleet')}>
-              <TableProperties size={25} /><span><strong>Tabela da frota</strong><small>Comparar situação e previsão de cada veículo</small></span><ChevronRight size={19} />
-            </button>
-            <button onClick={() => setActiveView('prescriptions')}>
-              <Sparkles size={25} /><span><strong>Prescrições do CCO</strong><small>Priorizar trocas que reduzem o atraso global</small></span><ChevronRight size={19} />
-            </button>
-          </section>
+          <OverviewDashboard
+            vehicles={vehicles}
+            statusByVehicle={operationalStatusByVehicle}
+            scheduleByVehicle={scheduleByVehicle}
+            prescription={prescription}
+            executions={swapExecutions}
+            generatedAt={data?.generated_at}
+            onOpenVehicle={openVehicleOnMap}
+            onOpenFleet={openFleet}
+            onOpenPrescriptions={() => setActiveView('prescriptions')}
+            map={(
+              <Suspense fallback={<div className="map-loading"><RefreshCw className="spin" /> Carregando mapa…</div>}>
+                <OperationsMap
+                  vehicles={vehicles}
+                  selectedVehicle={null}
+                  tripGeometry={null}
+                  operationalStatusByVehicle={operationalStatusByVehicle}
+                  onSelectVehicle={openVehicleOnMap}
+                />
+              </Suspense>
+            )}
+          />
         )}
 
         {activeView === 'map' && <section className="map-card">
@@ -342,6 +372,8 @@ function App() {
           <FleetTable
             positions={vehicles}
             refreshToken={viewRefreshToken}
+            presetStatus={fleetPresetStatus}
+            presetToken={fleetPresetToken}
             onOpenVehicle={openVehicleOnMap}
           />
         )}

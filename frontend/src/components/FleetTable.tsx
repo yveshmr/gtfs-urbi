@@ -10,12 +10,15 @@ import type {
   VehicleScheduleContextList,
 } from '../types'
 import { formatClock, formatPercent } from '../utils/format'
+import { classifyVehicleDelay } from '../utils/operationalStatus'
 import { ColumnFilter } from './ColumnFilter'
 import { compareSortValues, SortableHeader, type SortState } from './SortableHeader'
 
 interface FleetTableProps {
   positions: ProjectedVehiclePosition[]
   refreshToken: number
+  presetStatus?: string | null
+  presetToken?: number
   onOpenVehicle: (vehiclePrefix: string) => void
 }
 
@@ -38,6 +41,7 @@ interface FleetRow {
   arrivalDelay: number | null
   departureDelay: number | null
   status: string
+  statusKey: 'on-time' | 'warning' | 'delayed' | 'no-reference'
 }
 
 function sortValue(row: FleetRow, key: FilterKey): unknown {
@@ -83,10 +87,14 @@ function signedMinutes(seconds: number | null) {
 }
 
 function operationalStatus(delay: number | null) {
-  if (delay == null) return 'Sem referência'
-  if (delay > 0) return 'Atrasado'
-  if (delay < 0) return 'Adiantado'
-  return 'No horário'
+  const status = classifyVehicleDelay(delay)
+  const labels = {
+    no_reference: { label: 'Sem referência', key: 'no-reference' as const },
+    delayed: { label: 'Atraso crítico', key: 'delayed' as const },
+    warning: { label: 'Atenção', key: 'warning' as const },
+    on_time: { label: 'No horário / adiantado', key: 'on-time' as const },
+  }
+  return labels[status]
 }
 
 function matches(value: unknown, filter: string) {
@@ -95,12 +103,22 @@ function matches(value: unknown, filter: string) {
   )
 }
 
-export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTableProps) {
+export function FleetTable({
+  positions,
+  refreshToken,
+  presetStatus,
+  presetToken,
+  onOpenVehicle,
+}: FleetTableProps) {
   const [snapshots, setSnapshots] = useState<VehicleEtaSnapshotList | null>(null)
   const [scheduleContexts, setScheduleContexts] = useState<VehicleScheduleContextList | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [sort, setSort] = useState<SortState<FilterKey>>({ key: 'eta', direction: 'asc' })
+
+  useEffect(() => {
+    setFilters({ ...EMPTY_FILTERS, status: presetStatus ?? '' })
+  }, [presetStatus, presetToken])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -136,7 +154,11 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
     const estimatedAt = eta?.current_time.service.trip_end.estimated_at
     const arrivalDelay = differenceSeconds(estimatedAt, schedule?.planned_end_at)
     const departureDelay = differenceSeconds(schedule?.actual_start_at, schedule?.planned_start_at)
-    return { vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status: operationalStatus(arrivalDelay) }
+    const status = operationalStatus(arrivalDelay)
+    return {
+      vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay,
+      status: status.label, statusKey: status.key,
+    }
   }).filter(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status }) => {
     const values: Record<FilterKey, unknown> = {
       vehicle: vehicle.vehicle_prefix,
@@ -198,10 +220,10 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status }) => {
+            {rows.map(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status, statusKey }) => {
               const confidence = eta?.current_time.service.trip_end.reliability ?? 0
               return (
-                <tr key={vehicle.vehicle_prefix}>
+                <tr key={vehicle.vehicle_prefix} className={`fleet-status-row ${statusKey}`}>
                   <td><strong className="vehicle-cell"><BusFront size={15} /> {vehicle.vehicle_prefix}</strong></td>
                   <td><span className="line-chip">{schedule?.line ?? vehicle.route_short_name ?? vehicle.current_line ?? '—'}</span></td>
                   <td>{schedule?.direction ?? vehicle.direction_id ?? '—'}</td><td>{schedule?.schedule_table ?? '—'}</td>
@@ -210,7 +232,7 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
                   <td>{formatClock(schedule?.planned_start_at)}</td><td>{formatClock(schedule?.actual_start_at)}</td><td>{formatClock(schedule?.planned_end_at)}</td>
                   <td><strong>{formatClock(estimatedAt)}</strong></td>
                   <td><span className={`delay-value ${arrivalDelay != null && arrivalDelay > 0 ? 'baseline' : 'proposed'}`}>{signedMinutes(arrivalDelay)}</span></td>
-                  <td>{signedMinutes(departureDelay)}</td><td><span className="operation-status">{status}</span></td>
+                  <td>{signedMinutes(departureDelay)}</td><td><span className={`operation-status ${statusKey}`}>{status}</span></td>
                   <td>{vehicle.speed_kmh == null ? '—' : `${Math.round(vehicle.speed_kmh)} km/h`}</td>
                   <td><span className={`quality-badge ${vehicle.projection_quality}`}>{formatPercent(confidence)}</span><small>{sourceLabel(eta)}</small></td>
                   <td>{formatClock(vehicle.source_timestamp)}</td>

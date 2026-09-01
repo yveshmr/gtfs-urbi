@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { VehicleEtaSnapshot, VehicleScheduleContext } from '../types'
-import { buildVehicleOperationalStatus } from './operationalStatus'
+import { buildVehicleOperationalStatus, classifyVehicleDelay } from './operationalStatus'
 
 function etaAt(estimatedAt: string): VehicleEtaSnapshot {
   const target = {
@@ -31,6 +31,14 @@ function etaAt(estimatedAt: string): VehicleEtaSnapshot {
 const schedule = { vehicle_prefix: '1001', planned_end_at: '2026-08-31T13:00:00-03:00' } as VehicleScheduleContext
 
 describe('buildVehicleOperationalStatus', () => {
+  it('mantém a mesma classificação usada pela tabela e pelo mapa', () => {
+    expect(classifyVehicleDelay(-1)).toBe('on_time')
+    expect(classifyVehicleDelay(1)).toBe('warning')
+    expect(classifyVehicleDelay(600)).toBe('warning')
+    expect(classifyVehicleDelay(601)).toBe('delayed')
+    expect(classifyVehicleDelay(null)).toBe('no_reference')
+  })
+
   it('classifica mais de 10 minutos como atraso crítico', () => {
     expect(buildVehicleOperationalStatus(etaAt('2026-08-31T13:10:01-03:00'), schedule).status).toBe('delayed')
   })

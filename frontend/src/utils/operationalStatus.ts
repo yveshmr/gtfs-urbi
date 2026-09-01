@@ -9,6 +9,13 @@ export interface VehicleOperationalStatus {
   plannedArrivalAt: string | null
 }
 
+export function classifyVehicleDelay(delaySeconds: number | null): VehicleDelayStatus {
+  if (delaySeconds == null || !Number.isFinite(delaySeconds)) return 'no_reference'
+  if (delaySeconds > 10 * 60) return 'delayed'
+  if (delaySeconds > 0) return 'warning'
+  return 'on_time'
+}
+
 export function buildVehicleOperationalStatus(
   eta?: VehicleEtaSnapshot,
   schedule?: VehicleScheduleContext,
@@ -23,7 +30,7 @@ export function buildVehicleOperationalStatus(
     return { status: 'no_reference', delaySeconds: null, estimatedArrivalAt, plannedArrivalAt }
   }
   return {
-    status: delaySeconds > 10 * 60 ? 'delayed' : delaySeconds > 0 ? 'warning' : 'on_time',
+    status: classifyVehicleDelay(delaySeconds),
     delaySeconds,
     estimatedArrivalAt,
     plannedArrivalAt,
