@@ -5,6 +5,8 @@ import type {
   VehicleEtaSnapshotList,
   VehicleScheduleContextList,
   VehicleSwapPrescription,
+  SwapExecution,
+  SwapExecutionList,
 } from './types'
 
 export class ApiError extends Error {
@@ -16,9 +18,16 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function request<T>(
+  path: string,
+  signal?: AbortSignal,
+  init: RequestInit = {},
+): Promise<T> {
+  const headers = new Headers(init.headers)
+  headers.set('Accept', 'application/json')
   const response = await fetch(path, {
-    headers: { Accept: 'application/json' },
+    ...init,
+    headers,
     signal,
   })
   if (!response.ok) {
@@ -62,4 +71,20 @@ export function getVehicleScheduleContexts(signal?: AbortSignal) {
 
 export function getVehicleSwapPrescriptions(signal?: AbortSignal) {
   return request<VehicleSwapPrescription>('/api/v1/prescriptions/vehicle-swaps', signal)
+}
+
+export function getVehicleSwapExecutions(signal?: AbortSignal) {
+  return request<SwapExecutionList>('/api/v1/prescriptions/vehicle-swap-executions', signal)
+}
+
+export function confirmVehicleSwapExecution(
+  executionKey: string,
+  executedBy: string,
+  signal?: AbortSignal,
+) {
+  return request<SwapExecution>('/api/v1/prescriptions/vehicle-swap-executions', signal, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ execution_key: executionKey, executed_by: executedBy }),
+  })
 }

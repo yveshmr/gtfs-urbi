@@ -6,10 +6,12 @@ import type {
   ProjectedVehiclePosition,
   VehicleEtaSnapshot,
   VehicleEtaSnapshotList,
+  VehicleScheduleContext,
   VehicleScheduleContextList,
 } from '../types'
 import { formatClock, formatPercent } from '../utils/format'
 import { ColumnFilter } from './ColumnFilter'
+import { compareSortValues, SortableHeader, type SortState } from './SortableHeader'
 
 interface FleetTableProps {
   positions: ProjectedVehiclePosition[]
@@ -26,6 +28,39 @@ const EMPTY_FILTERS: Record<FilterKey, string> = {
   vehicle: '', line: '', direction: '', table: '', origin: '', destination: '',
   plannedStart: '', actualStart: '', plannedEnd: '', eta: '', arrivalDelay: '',
   departureDelay: '', status: '', speed: '', confidence: '', updated: '',
+}
+
+interface FleetRow {
+  vehicle: ProjectedVehiclePosition
+  eta?: VehicleEtaSnapshot
+  schedule?: VehicleScheduleContext
+  estimatedAt?: string | null
+  arrivalDelay: number | null
+  departureDelay: number | null
+  status: string
+}
+
+function sortValue(row: FleetRow, key: FilterKey): unknown {
+  const { vehicle, eta, schedule } = row
+  const values: Record<FilterKey, unknown> = {
+    vehicle: vehicle.vehicle_prefix,
+    line: schedule?.line ?? vehicle.route_short_name ?? vehicle.current_line,
+    direction: schedule?.direction ?? vehicle.direction_id,
+    table: schedule?.schedule_table,
+    origin: schedule?.origin_name ?? vehicle.current_origin_stop_name,
+    destination: schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign,
+    plannedStart: schedule?.planned_start_at,
+    actualStart: schedule?.actual_start_at,
+    plannedEnd: schedule?.planned_end_at,
+    eta: row.estimatedAt,
+    arrivalDelay: row.arrivalDelay,
+    departureDelay: row.departureDelay,
+    status: row.status,
+    speed: vehicle.speed_kmh,
+    confidence: eta?.current_time.service.trip_end.reliability,
+    updated: vehicle.source_timestamp,
+  }
+  return values[key]
 }
 
 function sourceLabel(snapshot: VehicleEtaSnapshot | undefined) {
@@ -65,6 +100,7 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
   const [scheduleContexts, setScheduleContexts] = useState<VehicleScheduleContextList | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [sort, setSort] = useState<SortState<FilterKey>>({ key: 'eta', direction: 'asc' })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -94,7 +130,7 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
     () => new Map((scheduleContexts?.vehicles ?? []).map((item) => [item.vehicle_prefix, item])),
     [scheduleContexts],
   )
-  const rows = useMemo(() => positions.map((vehicle) => {
+  const rows = useMemo(() => positions.map((vehicle): FleetRow => {
     const eta = etaByVehicle.get(vehicle.vehicle_prefix)
     const schedule = scheduleByVehicle.get(vehicle.vehicle_prefix)
     const estimatedAt = eta?.current_time.service.trip_end.estimated_at
@@ -118,10 +154,19 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
       updated: formatClock(vehicle.source_timestamp),
     }
     return (Object.keys(filters) as FilterKey[]).every((key) => matches(values[key], filters[key]))
-  }).sort((a, b) => (a.estimatedAt ? Date.parse(a.estimatedAt) : Infinity) - (b.estimatedAt ? Date.parse(b.estimatedAt) : Infinity)), [etaByVehicle, filters, positions, scheduleByVehicle])
+  }).sort((first, second) => {
+    return compareSortValues(sortValue(first, sort.key), sortValue(second, sort.key), sort.direction)
+  }), [etaByVehicle, filters, positions, scheduleByVehicle, sort])
 
   const setFilter = (key: FilterKey, value: string) => setFilters((current) => ({ ...current, [key]: value }))
   const hasFilters = Object.values(filters).some(Boolean)
+  const handleSort = (key: FilterKey) => setSort((current) => ({
+    key,
+    direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+  }))
+  const header = (key: FilterKey, label: string) => (
+    <SortableHeader columnKey={key} label={label} sort={sort} onSort={handleSort} />
+  )
   const filter = (key: FilterKey, label: string, placeholder?: string) => (
     <ColumnFilter label={label} value={filters[key]} onChange={(value) => setFilter(key, value)} placeholder={placeholder} />
   )
@@ -135,12 +180,14 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
       </div>
       {error && <div className="inline-alert"><AlertCircle size={16} /> {error}</div>}
       <div className="data-table-shell">
-        <table className="data-table fleet-table enriched-fleet-table">
+        <table className="data-table fleet-table fleet-compact-table">
           <thead>
             <tr>
-              <th>Veículo</th><th>Linha</th><th>Sentido</th><th>Tabela</th><th>Origem</th><th>Destino / terminal</th>
-              <th>Partida planejada</th><th>Partida real</th><th>Chegada planejada</th><th>ETA terminal</th>
-              <th>Atraso chegada</th><th>Atraso partida</th><th>Status</th><th>Velocidade</th><th>Confiança / fonte</th><th>Atualizado</th><th aria-label="Ações" />
+              <th>{header('vehicle', 'Veículo')}</th><th>{header('line', 'Linha')}</th><th>{header('direction', 'Sentido')}</th><th>{header('table', 'Tabela')}</th>
+              <th>{header('origin', 'Origem')}</th><th>{header('destination', 'Destino')}</th><th>{header('plannedStart', 'Partida plan.')}</th>
+              <th>{header('actualStart', 'Partida real')}</th><th>{header('plannedEnd', 'Chegada plan.')}</th><th>{header('eta', 'ETA terminal')}</th>
+              <th>{header('arrivalDelay', 'Atraso cheg.')}</th><th>{header('departureDelay', 'Atraso part.')}</th><th>{header('status', 'Status')}</th>
+              <th>{header('speed', 'Vel.')}</th><th>{header('confidence', 'Confiança')}</th><th>{header('updated', 'Atualizado')}</th><th aria-label="Ações" />
             </tr>
             <tr className="column-filter-row">
               <th>{filter('vehicle', 'veículo', 'Prefixo')}</th><th>{filter('line', 'linha')}</th><th>{filter('direction', 'sentido')}</th><th>{filter('table', 'tabela')}</th>
@@ -158,8 +205,8 @@ export function FleetTable({ positions, refreshToken, onOpenVehicle }: FleetTabl
                   <td><strong className="vehicle-cell"><BusFront size={15} /> {vehicle.vehicle_prefix}</strong></td>
                   <td><span className="line-chip">{schedule?.line ?? vehicle.route_short_name ?? vehicle.current_line ?? '—'}</span></td>
                   <td>{schedule?.direction ?? vehicle.direction_id ?? '—'}</td><td>{schedule?.schedule_table ?? '—'}</td>
-                  <td className="wide-cell">{schedule?.origin_name ?? vehicle.current_origin_stop_name ?? '—'}</td>
-                  <td className="wide-cell">{schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign ?? '—'}</td>
+                  <td className="compact-location-cell" title={schedule?.origin_name ?? vehicle.current_origin_stop_name ?? undefined}>{schedule?.origin_name ?? vehicle.current_origin_stop_name ?? '—'}</td>
+                  <td className="compact-location-cell" title={schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign ?? undefined}>{schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign ?? '—'}</td>
                   <td>{formatClock(schedule?.planned_start_at)}</td><td>{formatClock(schedule?.actual_start_at)}</td><td>{formatClock(schedule?.planned_end_at)}</td>
                   <td><strong>{formatClock(estimatedAt)}</strong></td>
                   <td><span className={`delay-value ${arrivalDelay != null && arrivalDelay > 0 ? 'baseline' : 'proposed'}`}>{signedMinutes(arrivalDelay)}</span></td>

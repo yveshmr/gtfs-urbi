@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -60,6 +61,15 @@ class ExchangeGroup:
     group_id: str
     terminal_id: str
     assignments: tuple[VehicleAssignment, ...]
+
+    @property
+    def execution_key(self) -> str:
+        actions = "|".join(
+            f"{item.commitment.vehicle_prefix}>{item.assigned_vehicle.vehicle_prefix}"
+            f"@{item.commitment.departure_at.isoformat()}"
+            for item in self.assignments
+        )
+        return hashlib.sha256(f"{self.terminal_id}|{actions}".encode()).hexdigest()
 
     @property
     def vehicle_prefixes(self) -> tuple[str, ...]:

@@ -45,3 +45,29 @@ def test_vehicle_swap_endpoint_returns_prescriptive_snapshot(monkeypatch) -> Non
     assert response.json()["status"] == "ready"
     assert response.json()["protected_window_minutes"] == 10
     assert query.await_count == 1
+
+
+def test_confirm_vehicle_swap_execution(monkeypatch) -> None:
+    executed_at = datetime(2026, 8, 31, 15, tzinfo=UTC)
+    execute = AsyncMock(
+        return_value={
+            "execution_key": "a" * 64,
+            "group_id": "terminal-G01",
+            "terminal_id": "terminal",
+            "snapshot_generated_at": executed_at,
+            "executed_at": executed_at,
+            "executed_by": "Operador 1",
+        }
+    )
+    monkeypatch.setattr(prescriptions_module, "execute_exchange_group", execute)
+    app.dependency_overrides[get_database_session] = fake_session
+    try:
+        response = client.post(
+            "/api/v1/prescriptions/vehicle-swap-executions",
+            json={"execution_key": "a" * 64, "executed_by": "Operador 1"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["executed_by"] == "Operador 1"

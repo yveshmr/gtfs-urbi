@@ -14,13 +14,26 @@ import {
   TableProperties,
 } from 'lucide-react'
 
-import { ApiError, getTripGeometry, getVehicleEta } from './api'
+import {
+  ApiError,
+  getTripGeometry,
+  getVehicleEta,
+  getVehicleEtaSnapshots,
+  getVehicleScheduleContexts,
+} from './api'
 import { FleetTable } from './components/FleetTable'
 import { PrescriptionsTable } from './components/PrescriptionsTable'
 import { VehicleDetails } from './components/VehicleDetails'
 import { useFleetPositions } from './hooks/useFleetPositions'
-import type { ProjectedVehiclePosition, TripGeometry, VehicleEta } from './types'
+import type {
+  ProjectedVehiclePosition,
+  TripGeometry,
+  VehicleEta,
+  VehicleEtaSnapshotList,
+  VehicleScheduleContextList,
+} from './types'
 import { formatClock } from './utils/format'
+import { buildVehicleOperationalStatus } from './utils/operationalStatus'
 
 const OperationsMap = lazy(() =>
   import('./components/OperationsMap').then((module) => ({ default: module.OperationsMap })),
@@ -42,6 +55,8 @@ function App() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [query, setQuery] = useState('')
+  const [etaSnapshots, setEtaSnapshots] = useState<VehicleEtaSnapshotList | null>(null)
+  const [scheduleContexts, setScheduleContexts] = useState<VehicleScheduleContextList | null>(null)
 
   const vehicles = data?.vehicles ?? []
   const liveSelectedVehicle = useMemo(
@@ -56,6 +71,30 @@ function App() {
     selectedVehicleSnapshot.current = null
   }
   const selectedVehicle = liveSelectedVehicle ?? selectedVehicleSnapshot.current
+  const etaByVehicle = useMemo(
+    () => new Map((etaSnapshots?.vehicles ?? []).map((item) => [item.vehicle_prefix, item])),
+    [etaSnapshots],
+  )
+  const scheduleByVehicle = useMemo(
+    () => new Map((scheduleContexts?.vehicles ?? []).map((item) => [item.vehicle_prefix, item])),
+    [scheduleContexts],
+  )
+  const operationalStatusByVehicle = useMemo(
+    () => new Map(vehicles.map((vehicle) => [
+      vehicle.vehicle_prefix,
+      buildVehicleOperationalStatus(
+        etaByVehicle.get(vehicle.vehicle_prefix),
+        scheduleByVehicle.get(vehicle.vehicle_prefix),
+      ),
+    ])),
+    [etaByVehicle, scheduleByVehicle, vehicles],
+  )
+  const selectedOperationalStatus = selectedVehicle
+    ? operationalStatusByVehicle.get(selectedVehicle.vehicle_prefix)
+    : undefined
+  const selectedSchedule = selectedVehicle
+    ? scheduleByVehicle.get(selectedVehicle.vehicle_prefix) ?? null
+    : null
   const searchResults = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('pt-BR')
     if (!normalized) return []
@@ -67,6 +106,25 @@ function App() {
       )
       .slice(0, 8)
   }, [query, vehicles])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const loadOperationalReferences = async () => {
+      const [etaResult, scheduleResult] = await Promise.allSettled([
+        getVehicleEtaSnapshots(controller.signal),
+        getVehicleScheduleContexts(controller.signal),
+      ])
+      if (controller.signal.aborted) return
+      if (etaResult.status === 'fulfilled') setEtaSnapshots(etaResult.value)
+      if (scheduleResult.status === 'fulfilled') setScheduleContexts(scheduleResult.value)
+    }
+    void loadOperationalReferences()
+    const timer = window.setInterval(() => void loadOperationalReferences(), 30_000)
+    return () => {
+      window.clearInterval(timer)
+      controller.abort()
+    }
+  }, [viewRefreshToken])
 
   useEffect(() => {
     if (!selectedVehicle) {
@@ -107,9 +165,9 @@ function App() {
   }, [selectedVehicle?.trip_id, selectedVehicle?.vehicle_prefix])
 
   const validCount = vehicles.filter((vehicle) => vehicle.projection_quality === 'valid').length
-  const averageSpeed = vehicles.length
-    ? vehicles.reduce((sum, vehicle) => sum + (vehicle.speed_kmh ?? 0), 0) / vehicles.length
-    : 0
+  const criticalDelayCount = [...operationalStatusByVehicle.values()].filter(
+    (status) => status.status === 'delayed',
+  ).length
 
   const selectVehicle = (prefix: string) => {
     setSelectedPrefix(prefix)
@@ -202,7 +260,7 @@ function App() {
           </article>
           <article className="kpi-card orange">
             <div className="kpi-icon"><Clock3 size={21} /></div>
-            <div><span>Velocidade média</span><strong>{averageSpeed.toFixed(0)} <em>km/h</em></strong><small>veículos exibidos</small></div>
+            <div><span>Atrasos críticos</span><strong>{criticalDelayCount}</strong><small>ETA acima de 10 minutos</small></div>
           </article>
           <article className={`kpi-card ${error ? 'red' : 'navy'}`}>
             <div className="kpi-icon">{error ? <AlertCircle size={21} /> : <span className="signal-bars">▮▮▮</span>}</div>
@@ -247,8 +305,10 @@ function App() {
               )}
             </div>
             <div className="map-legend">
-              <span><i className="legend-dot valid" /> Projeção válida</span>
-              <span><i className="legend-dot reduced" /> Confiança reduzida</span>
+              <span><i className="legend-dot on-time" /> No horário</span>
+              <span><i className="legend-dot warning" /> Até 10 min</span>
+              <span><i className="legend-dot delayed" /> Acima de 10 min</span>
+              <span><i className="legend-dot reduced" /> Sem referência</span>
               <span><i className="legend-line current" /> Trecho atual</span>
             </div>
           </div>
@@ -258,6 +318,7 @@ function App() {
               vehicles={vehicles}
               selectedVehicle={selectedVehicle}
               tripGeometry={geometry}
+              operationalStatusByVehicle={operationalStatusByVehicle}
               onSelectVehicle={selectVehicle}
             />
           </Suspense>
@@ -268,6 +329,8 @@ function App() {
               vehicle={selectedVehicle}
               geometry={geometry}
               eta={eta}
+              schedule={selectedSchedule}
+              operationalStatus={selectedOperationalStatus}
               loading={detailLoading}
               error={detailError}
               onClose={clearSelectedVehicle}

@@ -9,18 +9,27 @@ import {
   X,
 } from 'lucide-react'
 
-import type { EtaTarget, ProjectedVehiclePosition, TripGeometry, VehicleEta } from '../types'
+import type {
+  EtaTarget,
+  ProjectedVehiclePosition,
+  TripGeometry,
+  VehicleEta,
+  VehicleScheduleContext,
+} from '../types'
 import {
   formatClock,
   formatDistance,
   formatMinutes,
   formatPercent,
 } from '../utils/format'
+import type { VehicleOperationalStatus } from '../utils/operationalStatus'
 
 interface VehicleDetailsProps {
   vehicle: ProjectedVehiclePosition
   geometry: TripGeometry | null
   eta: VehicleEta | null
+  schedule: VehicleScheduleContext | null
+  operationalStatus?: VehicleOperationalStatus
   loading: boolean
   error: string | null
   onClose: () => void
@@ -59,6 +68,8 @@ export function VehicleDetails({
   vehicle,
   geometry,
   eta,
+  schedule,
+  operationalStatus,
   loading,
   error,
   onClose,
@@ -66,6 +77,15 @@ export function VehicleDetails({
   const currentTripEnd = eta?.current_time.service.trip_end
   const futureTripEnd = eta?.future_time.service.trip_end
   const nextStop = eta?.future_time.service.next_stop
+  const statusLabels = {
+    delayed: 'Atraso crítico',
+    warning: 'Atenção',
+    on_time: 'No horário',
+    no_reference: 'Sem referência planejada',
+  }
+  const delayMinutes = operationalStatus?.delaySeconds == null
+    ? '—'
+    : `${operationalStatus.delaySeconds > 0 ? '+' : ''}${Math.round(operationalStatus.delaySeconds / 60)} min`
 
   return (
     <aside className="vehicle-panel" aria-label={`Detalhes do veículo ${vehicle.vehicle_prefix}`}>
@@ -105,6 +125,19 @@ export function VehicleDetails({
           <span>{vehicle.current_origin_stop_name ?? vehicle.current_origin_stop_id ?? 'Origem'}</span>
           <ArrowRight size={16} />
           <strong>{vehicle.current_destination_stop_name ?? vehicle.current_destination_stop_id ?? 'Próxima parada'}</strong>
+        </div>
+      </section>
+
+      <section className={`arrival-status-card ${operationalStatus?.status ?? 'no_reference'}`}>
+        <div className="arrival-status-heading">
+          <span>Chegada ao terminal</span>
+          <strong>{statusLabels[operationalStatus?.status ?? 'no_reference']}</strong>
+        </div>
+        <div className="arrival-status-times">
+          <div><span>Planejada</span><strong>{formatClock(schedule?.planned_end_at)}</strong></div>
+          <ArrowRight size={16} />
+          <div><span>Prevista pelo ETA</span><strong>{formatClock(operationalStatus?.estimatedArrivalAt)}</strong></div>
+          <div className="arrival-delay"><span>Desvio</span><strong>{delayMinutes}</strong></div>
         </div>
       </section>
 

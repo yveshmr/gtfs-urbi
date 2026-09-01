@@ -140,6 +140,7 @@ def _response_plan(plan: TerminalSwapPlan) -> TerminalSwapPlanResponse:
         proposed_max_delay_seconds=plan.proposed_max_delay_seconds,
         exchange_groups=[
             ExchangeGroupResponse(
+                execution_key=group.execution_key,
                 group_id=group.group_id,
                 terminal_id=group.terminal_id,
                 vehicle_prefixes=list(group.vehicle_prefixes),

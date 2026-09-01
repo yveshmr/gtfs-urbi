@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SwapAssignmentResponse(BaseModel):
@@ -25,6 +25,7 @@ class SwapAssignmentResponse(BaseModel):
 
 
 class ExchangeGroupResponse(BaseModel):
+    execution_key: str
     group_id: str
     terminal_id: str
     vehicle_prefixes: list[str]
@@ -63,3 +64,22 @@ class VehicleSwapPrescriptionResponse(BaseModel):
     plan_count: int
     total_saved_delay_seconds: int
     plans: list[TerminalSwapPlanResponse]
+
+
+class ExecuteExchangeGroupRequest(BaseModel):
+    execution_key: str = Field(min_length=64, max_length=64)
+    executed_by: str = Field(min_length=1, max_length=100)
+
+
+class SwapExecutionResponse(BaseModel):
+    execution_key: str
+    group_id: str
+    terminal_id: str
+    snapshot_generated_at: datetime
+    executed_at: datetime
+    executed_by: str
+
+
+class SwapExecutionListResponse(BaseModel):
+    count: int
+    executions: list[SwapExecutionResponse]

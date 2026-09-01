@@ -15,6 +15,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
 import type { ProjectedVehiclePosition, TripGeometry } from '../types'
 import { sliceLineBetweenFractions, splitLineAtFraction } from '../utils/geometry'
+import type { VehicleOperationalStatus } from '../utils/operationalStatus'
 
 setWorkerUrl(workerUrl)
 
@@ -22,6 +23,7 @@ interface OperationsMapProps {
   vehicles: ProjectedVehiclePosition[]
   selectedVehicle: ProjectedVehiclePosition | null
   tripGeometry: TripGeometry | null
+  operationalStatusByVehicle: Map<string, VehicleOperationalStatus>
   onSelectVehicle: (vehiclePrefix: string) => void
 }
 
@@ -129,10 +131,11 @@ const NEUTRAL_STYLE: StyleSpecification = {
       paint: {
         'circle-radius': 7,
         'circle-color': [
-          'case',
-          ['==', ['get', 'quality'], 'valid'],
-          '#009CDF',
-          '#F2C94C',
+          'match', ['get', 'delayStatus'],
+          'delayed', '#EB5757',
+          'warning', '#F2994A',
+          'on_time', '#009CDF',
+          ['case', ['==', ['get', 'quality'], 'valid'], '#009CDF', '#F2C94C'],
         ],
         'circle-stroke-color': '#FFFFFF',
         'circle-stroke-width': 2,
@@ -145,15 +148,24 @@ const NEUTRAL_STYLE: StyleSpecification = {
       source: 'selected-vehicle',
       paint: {
         'circle-radius': 11,
-        'circle-color': '#003B5C',
-        'circle-stroke-color': '#FFFFFF',
+        'circle-color': [
+          'match', ['get', 'delayStatus'],
+          'delayed', '#EB5757',
+          'warning', '#F2994A',
+          'on_time', '#009CDF',
+          ['case', ['==', ['get', 'quality'], 'valid'], '#009CDF', '#F2C94C'],
+        ],
+        'circle-stroke-color': '#003B5C',
         'circle-stroke-width': 3,
       },
     },
   ],
 }
 
-function fleetCollection(vehicles: ProjectedVehiclePosition[]): FeatureCollection<Point> {
+function fleetCollection(
+  vehicles: ProjectedVehiclePosition[],
+  operationalStatusByVehicle: Map<string, VehicleOperationalStatus>,
+): FeatureCollection<Point> {
   return {
     type: 'FeatureCollection',
     features: vehicles.map((vehicle) => ({
@@ -167,6 +179,7 @@ function fleetCollection(vehicles: ProjectedVehiclePosition[]): FeatureCollectio
         vehiclePrefix: vehicle.vehicle_prefix,
         line: vehicle.route_short_name ?? vehicle.current_line ?? 'Sem linha',
         quality: vehicle.projection_quality,
+        delayStatus: operationalStatusByVehicle.get(vehicle.vehicle_prefix)?.status ?? 'no_reference',
       },
     })),
   }
@@ -210,6 +223,7 @@ export function OperationsMap({
   vehicles,
   selectedVehicle,
   tripGeometry,
+  operationalStatusByVehicle,
   onSelectVehicle,
 }: OperationsMapProps) {
   const container = useRef<HTMLDivElement | null>(null)
@@ -300,8 +314,12 @@ export function OperationsMap({
 
   useEffect(() => {
     if (!ready || !map.current) return
-    updateSource(map.current, 'fleet-vehicles', fleetCollection(vehicles))
-  }, [ready, styleRevision, vehicles])
+    updateSource(
+      map.current,
+      'fleet-vehicles',
+      fleetCollection(vehicles, operationalStatusByVehicle),
+    )
+  }, [operationalStatusByVehicle, ready, styleRevision, vehicles])
 
   useEffect(() => {
     if (!ready || !map.current) return
@@ -315,13 +333,18 @@ export function OperationsMap({
                 type: 'Point',
                 coordinates: [selectedVehicle.longitude, selectedVehicle.latitude],
               },
-              properties: {},
+              properties: {
+                quality: selectedVehicle.projection_quality,
+                delayStatus:
+                  operationalStatusByVehicle.get(selectedVehicle.vehicle_prefix)?.status ??
+                  'no_reference',
+              },
             },
           ],
         }
       : { type: 'FeatureCollection', features: [] }
     updateSource(map.current, 'selected-vehicle', point)
-  }, [ready, selectedVehicle, styleRevision])
+  }, [operationalStatusByVehicle, ready, selectedVehicle, styleRevision])
 
   useEffect(() => {
     if (!ready || !map.current || !tripGeometry || !selectedVehicle) {

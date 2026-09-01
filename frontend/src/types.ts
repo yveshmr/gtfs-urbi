@@ -158,6 +158,7 @@ export interface SwapAssignment {
 }
 
 export interface ExchangeGroup {
+  execution_key: string
   group_id: string
   terminal_id: string
   vehicle_prefixes: string[]
@@ -169,6 +170,20 @@ export interface ExchangeGroup {
   proposed_max_delay_seconds: number
   minimum_eta_reliability: number
   steps: SwapAssignment[]
+}
+
+export interface SwapExecution {
+  execution_key: string
+  group_id: string
+  terminal_id: string
+  snapshot_generated_at: string
+  executed_at: string
+  executed_by: string
+}
+
+export interface SwapExecutionList {
+  count: number
+  executions: SwapExecution[]
 }
 
 export interface TerminalSwapPlan {

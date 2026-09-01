@@ -68,6 +68,7 @@ def test_optimizer_supports_terminal_wide_reallocation_chain() -> None:
     groups = build_exchange_groups(plan)
     assert len(groups) == 1
     assert groups[0].group_id == "terminal-1-G01"
+    assert len(groups[0].execution_key) == 64
     assert groups[0].vehicle_prefixes == ("A", "B", "C")
     assert groups[0].saved_delay_seconds == 35 * 60
 
