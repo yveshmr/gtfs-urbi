@@ -21,8 +21,10 @@ function etaAt(estimatedAt: string): VehicleEtaSnapshot {
   const serviceFuture = { scope: 'service' as const, scenario: 'future_time' as const, next_stop: target, trip_end: target }
   return {
     generated_at: '2026-08-31T12:00:00-03:00', queried_at: '2026-08-31T12:00:00-03:00',
+    calculation_mode: 'enriched',
     vehicle_prefix: '1001', trip_id: 'trip', route_id: 'route', direction_id: 0,
-    next_stop_id: 'next', terminal_stop_id: 'terminal', remaining_segment_count: 1,
+    next_stop_id: 'next', terminal_stop_id: 'terminal',
+    planned_trip_end_at: '2026-08-31T13:00:00-03:00', remaining_segment_count: 1,
     current_time: { physical: physicalCurrent, service: serviceCurrent },
     future_time: { physical: physicalFuture, service: serviceFuture },
   }
@@ -57,7 +59,13 @@ describe('buildVehicleOperationalStatus', () => {
     expect(buildVehicleOperationalStatus(eta, schedule).status).toBe('delayed')
   })
 
-  it('mantém sem referência quando não há chegada planejada', () => {
-    expect(buildVehicleOperationalStatus(etaAt('2026-08-31T13:00:00-03:00'), undefined).status).toBe('no_reference')
+  it('usa a chegada planejada do GTFS quando o contexto externo não está disponível', () => {
+    expect(buildVehicleOperationalStatus(etaAt('2026-08-31T13:00:00-03:00'), undefined).status).toBe('on_time')
+  })
+
+  it('mantém sem referência somente quando nenhuma chegada planejada existe', () => {
+    const eta = etaAt('2026-08-31T13:00:00-03:00')
+    eta.planned_trip_end_at = null
+    expect(buildVehicleOperationalStatus(eta, undefined).status).toBe('no_reference')
   })
 })

@@ -135,7 +135,7 @@ export function OverviewDashboard({
   const maxTerminalDelay = Math.max(1, ...criticalTerminals.map((plan) => plan.baseline_total_delay_seconds))
   const hasFleetFilters = Boolean(lineFilter || terminalFilter || statusFilter)
   const sourceCounts = filteredVehicles.reduce<Record<string, number>>((counts, vehicle) => {
-    const sources = etaByVehicle.get(vehicle.vehicle_prefix)?.current_time.service.trip_end.source_counts ?? {}
+    const sources = etaByVehicle.get(vehicle.vehicle_prefix)?.future_time.service.trip_end.source_counts ?? {}
     Object.entries(sources).forEach(([source, count]) => { counts[source] = (counts[source] ?? 0) + count })
     return counts
   }, {})

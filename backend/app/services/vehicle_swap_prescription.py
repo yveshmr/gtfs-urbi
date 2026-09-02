@@ -170,10 +170,6 @@ async def query_vehicle_swap_prescriptions(
     result = await session.execute(
         text(
             """
-            WITH latest_snapshot AS (
-                SELECT MAX(generated_at) AS generated_at
-                FROM realtime.vehicle_eta_snapshots
-            )
             SELECT
                 snapshot.generated_at,
                 snapshot.vehicle_prefix,
@@ -186,9 +182,7 @@ async def query_vehicle_swap_prescriptions(
                 state.next_line,
                 state.next_direction,
                 state.next_trip_destination AS next_destination
-            FROM latest_snapshot
-            JOIN realtime.vehicle_eta_snapshots AS snapshot
-              ON snapshot.generated_at = latest_snapshot.generated_at
+            FROM realtime.vehicle_eta_snapshots AS snapshot
             JOIN realtime.vehicle_current_states AS state
               ON state.vehicle_prefix = snapshot.vehicle_prefix
              AND state.trip_id = snapshot.trip_id
@@ -214,9 +208,15 @@ async def query_vehicle_swap_prescriptions(
             plans=[],
         )
 
-    generated_at = rows[0]["generated_at"]
+    generated_at = max(row["generated_at"] for row in rows)
     snapshot_age = max(0.0, (evaluated_at - generated_at).total_seconds())
-    if snapshot_age > _MAX_SNAPSHOT_AGE.total_seconds():
+    fresh_rows = [
+        row
+        for row in rows
+        if (evaluated_at - row["generated_at"]).total_seconds()
+        <= _MAX_SNAPSHOT_AGE.total_seconds()
+    ]
+    if not fresh_rows:
         return VehicleSwapPrescriptionResponse(
             status="stale",
             evaluated_at=evaluated_at,
@@ -232,7 +232,7 @@ async def query_vehicle_swap_prescriptions(
         )
 
     commitments_by_terminal: dict[str, list[VehicleCommitment]] = defaultdict(list)
-    for row in rows:
+    for row in fresh_rows:
         commitment = _commitment_from_row(row, evaluated_at=evaluated_at)
         if commitment is not None:
             commitments_by_terminal[commitment.terminal_id].append(commitment)

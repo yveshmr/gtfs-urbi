@@ -33,12 +33,14 @@ class EtaScenarioResponse(BaseModel):
 
 class VehicleEtaResponse(BaseModel):
     queried_at: datetime
+    calculation_mode: Literal["enriched", "planned_baseline"] = "enriched"
     vehicle_prefix: str
     trip_id: str
     route_id: str
     direction_id: int
     next_stop_id: str
     terminal_stop_id: str
+    planned_trip_end_at: datetime | None = None
     remaining_segment_count: int
     current_time: EtaScenarioResponse
     future_time: EtaScenarioResponse
@@ -58,15 +60,18 @@ def build_vehicle_eta_response(
     result: VehicleEtaResult,
     *,
     queried_at: datetime,
+    calculation_mode: Literal["enriched", "planned_baseline"] = "enriched",
 ) -> VehicleEtaResponse:
     return VehicleEtaResponse(
         queried_at=queried_at,
+        calculation_mode=calculation_mode,
         vehicle_prefix=result.vehicle_prefix,
         trip_id=result.trip_id,
         route_id=result.route_id,
         direction_id=result.direction_id,
         next_stop_id=result.next_stop_id,
         terminal_stop_id=result.terminal_stop_id,
+        planned_trip_end_at=result.planned_trip_end_at,
         remaining_segment_count=result.remaining_segment_count,
         current_time=EtaScenarioResponse(
             physical=EtaProjectionResponse(**asdict(result.current_time_physical)),

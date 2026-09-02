@@ -40,6 +40,7 @@ interface FleetRow {
   eta?: VehicleEtaSnapshot
   schedule?: VehicleScheduleContext
   estimatedAt?: string | null
+  plannedAt?: string | null
   arrivalDelay: number | null
   departureDelay: number | null
   status: string
@@ -58,13 +59,13 @@ function sortValue(row: FleetRow, key: FilterKey): unknown {
     destination: schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign,
     plannedStart: schedule?.planned_start_at,
     actualStart: schedule?.actual_start_at,
-    plannedEnd: schedule?.planned_end_at,
+    plannedEnd: row.plannedAt,
     eta: row.estimatedAt,
     arrivalDelay: row.arrivalDelay,
     departureDelay: row.departureDelay,
     status: row.status,
     speed: vehicle.speed_kmh,
-    confidence: eta?.current_time.service.trip_end.reliability,
+    confidence: eta?.future_time.service.trip_end.reliability,
     updated: vehicle.source_timestamp,
   }
   return values[key]
@@ -143,8 +144,17 @@ export function FleetTable({
   }, [refreshToken])
 
   const etaByVehicle = useMemo(
-    () => new Map((snapshots?.vehicles ?? []).map((item) => [item.vehicle_prefix, item])),
-    [snapshots],
+    () => {
+      const currentTripByVehicle = new Map(
+        positions.map((vehicle) => [vehicle.vehicle_prefix, vehicle.trip_id]),
+      )
+      return new Map(
+        (snapshots?.vehicles ?? [])
+          .filter((item) => currentTripByVehicle.get(item.vehicle_prefix) === item.trip_id)
+          .map((item) => [item.vehicle_prefix, item]),
+      )
+    },
+    [positions, snapshots],
   )
   const scheduleByVehicle = useMemo(
     () => new Map((scheduleContexts?.vehicles ?? []).map((item) => [item.vehicle_prefix, item])),
@@ -153,16 +163,17 @@ export function FleetTable({
   const rows = useMemo(() => positions.map((vehicle): FleetRow => {
     const eta = etaByVehicle.get(vehicle.vehicle_prefix)
     const schedule = scheduleByVehicle.get(vehicle.vehicle_prefix)
-    const estimatedAt = eta?.current_time.service.trip_end.estimated_at
-    const arrivalDelay = differenceSeconds(estimatedAt, schedule?.planned_end_at)
+    const estimatedAt = eta?.future_time.service.trip_end.estimated_at
+    const plannedAt = schedule?.planned_end_at ?? eta?.planned_trip_end_at
+    const arrivalDelay = differenceSeconds(estimatedAt, plannedAt)
     const departureDelay = differenceSeconds(schedule?.actual_start_at, schedule?.planned_start_at)
     const status = operationalStatus(arrivalDelay)
     const alerts = buildVehicleAlerts(vehicle, now)
     return {
-      vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay,
+      vehicle, eta, schedule, estimatedAt, plannedAt, arrivalDelay, departureDelay,
       status: status.label, statusKey: status.key, alerts,
     }
-  }).filter(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status, alerts }) => {
+  }).filter(({ vehicle, eta, schedule, estimatedAt, plannedAt, arrivalDelay, departureDelay, status, alerts }) => {
     const values: Record<FilterKey, unknown> = {
       vehicle: vehicle.vehicle_prefix,
       line: schedule?.line ?? vehicle.route_short_name ?? vehicle.current_line,
@@ -172,11 +183,11 @@ export function FleetTable({
       destination: schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign,
       plannedStart: formatClock(schedule?.planned_start_at),
       actualStart: formatClock(schedule?.actual_start_at),
-      plannedEnd: formatClock(schedule?.planned_end_at), eta: formatClock(estimatedAt),
+      plannedEnd: formatClock(plannedAt), eta: formatClock(estimatedAt),
       arrivalDelay: signedMinutes(arrivalDelay), departureDelay: signedMinutes(departureDelay),
       status: `${status} ${alerts.stale ? 'Sem atualização' : ''} ${alerts.lowSpeed ? 'Abaixo de 1 km/h por 5 min' : ''}`,
       speed: vehicle.speed_kmh == null ? '' : Math.round(vehicle.speed_kmh),
-      confidence: formatPercent(eta?.current_time.service.trip_end.reliability ?? 0),
+      confidence: formatPercent(eta?.future_time.service.trip_end.reliability ?? 0),
       updated: formatClock(vehicle.source_timestamp),
     }
     return (Object.keys(filters) as FilterKey[]).every((key) => matches(values[key], filters[key]))
@@ -224,8 +235,8 @@ export function FleetTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ vehicle, eta, schedule, estimatedAt, arrivalDelay, departureDelay, status, statusKey, alerts }) => {
-              const confidence = eta?.current_time.service.trip_end.reliability ?? 0
+            {rows.map(({ vehicle, eta, schedule, estimatedAt, plannedAt, arrivalDelay, departureDelay, status, statusKey, alerts }) => {
+              const confidence = eta?.future_time.service.trip_end.reliability ?? 0
               return (
                 <tr key={vehicle.vehicle_prefix} className={`fleet-status-row ${statusKey} ${alerts.stale ? 'stale-alert' : ''} ${alerts.lowSpeed ? 'low-speed-alert' : ''}`}>
                   <td><strong className="vehicle-cell"><BusFront size={15} /> {vehicle.vehicle_prefix}</strong></td>
@@ -233,12 +244,12 @@ export function FleetTable({
                   <td>{schedule?.direction ?? vehicle.direction_id ?? '—'}</td><td>{schedule?.schedule_table ?? '—'}</td>
                   <td className="compact-location-cell" title={schedule?.origin_name ?? vehicle.current_origin_stop_name ?? undefined}>{schedule?.origin_name ?? vehicle.current_origin_stop_name ?? '—'}</td>
                   <td className="compact-location-cell" title={schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign ?? undefined}>{schedule?.destination_name ?? vehicle.current_destination_stop_name ?? vehicle.headsign ?? '—'}</td>
-                  <td>{formatClock(schedule?.planned_start_at)}</td><td>{formatClock(schedule?.actual_start_at)}</td><td>{formatClock(schedule?.planned_end_at)}</td>
+                  <td>{formatClock(schedule?.planned_start_at)}</td><td>{formatClock(schedule?.actual_start_at)}</td><td>{formatClock(plannedAt)}</td>
                   <td><strong>{formatClock(estimatedAt)}</strong></td>
                   <td><span className={`delay-value ${arrivalDelay != null && arrivalDelay > 0 ? 'baseline' : 'proposed'}`}>{signedMinutes(arrivalDelay)}</span></td>
                   <td>{signedMinutes(departureDelay)}</td><td><span className={`operation-status ${statusKey}`}>{status}</span>{alerts.stale && <small className="vehicle-alert-badge stale">Sem atualização há {formatMinutes(alerts.sourceAgeSeconds)}</small>}{alerts.lowSpeed && <small className="vehicle-alert-badge low-speed">Abaixo de 1 km/h há {formatMinutes(alerts.lowSpeedDurationSeconds)}</small>}</td>
                   <td>{vehicle.speed_kmh == null ? '—' : `${Math.round(vehicle.speed_kmh)} km/h`}</td>
-                  <td className="confidence-cell"><span className={`quality-badge ${vehicle.projection_quality}`}>{formatPercent(confidence)}</span><EtaSourceMix counts={eta?.current_time.service.trip_end.source_counts} compact /></td>
+                  <td className="confidence-cell"><span className={`quality-badge ${vehicle.projection_quality}`}>{formatPercent(confidence)}</span><EtaSourceMix counts={eta?.future_time.service.trip_end.source_counts} compact /></td>
                   <td>{formatClock(vehicle.source_timestamp)}</td>
                   <td><button className="row-action" onClick={() => onOpenVehicle(vehicle.vehicle_prefix)} title="Abrir no mapa"><ExternalLink size={15} /></button></td>
                 </tr>

@@ -4,13 +4,17 @@ import asyncio
 import logging
 import signal
 from collections.abc import Awaitable, Callable
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from app.core.config import get_settings
 from app.db.session import session_factory
 from app.integrations.cittati import CittatiClient
+from app.services.active_trip_index import ActiveTripIndex, load_active_trip_index
 from app.services.cittati_cycle import run_cittati_cycle
 
 logger = logging.getLogger("app.worker.cittati")
+_OPERATIONAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 
 def next_worker_delay_seconds(
@@ -119,18 +123,51 @@ async def run() -> None:
         company=settings.cittati_company,
         timeout_seconds=settings.cittati_timeout_seconds,
     ) as client:
+        active_trip_index: ActiveTripIndex | None = None
+        active_service_date: date | None = None
 
         async def execute_cycle() -> bool:
+            nonlocal active_trip_index, active_service_date
+            evaluated_at = datetime.now(UTC)
+            service_date = evaluated_at.astimezone(_OPERATIONAL_TIMEZONE).date()
             async with session_factory() as session:
-                result = await run_cittati_cycle(session, client)
+                if active_trip_index is None or active_service_date != service_date:
+                    active_trip_index = await load_active_trip_index(
+                        session,
+                        service_date=service_date,
+                    )
+                    active_service_date = service_date
+                    logger.info(
+                        "GTFS operational warmup completed service_date=%s trips=%s "
+                        "planned_segments=%s",
+                        service_date,
+                        len(active_trip_index.candidates_by_trip_id),
+                        sum(
+                            len(candidate.planned_segments)
+                            for candidate in active_trip_index.candidates_by_trip_id.values()
+                        ),
+                    )
+                result = await run_cittati_cycle(
+                    session,
+                    client,
+                    queried_at=evaluated_at,
+                    active_trip_index=active_trip_index,
+                )
             snapshot = result.snapshot
+            planned_snapshot = result.planned_snapshot
             logger.info(
                 "Cittati cycle finished status=%s records=%s snapshot_performed=%s "
-                "snapshots=%s",
+                "snapshots=%s planned_snapshots=%s planned_unavailable=%s",
                 result.ingestion_run.status,
                 result.ingestion_run.records_received,
                 snapshot.performed if snapshot is not None else False,
                 snapshot.snapshot_count if snapshot is not None else 0,
+                planned_snapshot.snapshot_count if planned_snapshot is not None else 0,
+                (
+                    planned_snapshot.unavailable_vehicle_count
+                    if planned_snapshot is not None
+                    else 0
+                ),
             )
             return result.succeeded
 

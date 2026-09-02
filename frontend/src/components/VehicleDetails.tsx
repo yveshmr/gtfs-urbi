@@ -133,7 +133,7 @@ export function VehicleDetails({
           <strong>{statusLabels[operationalStatus?.status ?? 'no_reference']}</strong>
         </div>
         <div className="arrival-status-times">
-          <div><span>Planejada</span><strong>{formatClock(schedule?.planned_end_at)}</strong></div>
+          <div><span>Planejada</span><strong>{formatClock(operationalStatus?.plannedArrivalAt)}</strong></div>
           <ArrowRight size={16} />
           <div><span>Prevista pelo ETA</span><strong>{formatClock(operationalStatus?.estimatedArrivalAt)}</strong></div>
           <div className="arrival-delay"><span>Desvio</span><strong>{delayMinutes}</strong></div>

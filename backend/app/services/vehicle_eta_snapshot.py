@@ -51,7 +51,13 @@ async def refresh_vehicle_eta_snapshots(
     window_start, _ = five_minute_window(queried_at)
     if not force:
         latest_generated_at = await session.scalar(
-            select(func.max(VehicleEtaSnapshot.generated_at))
+            select(func.max(VehicleEtaSnapshot.generated_at)).where(
+                func.coalesce(
+                    VehicleEtaSnapshot.payload["calculation_mode"].as_string(),
+                    "enriched",
+                )
+                == "enriched"
+            )
         )
         if latest_generated_at is not None and latest_generated_at >= window_start:
             return VehicleEtaSnapshotRefreshResult(False, 0, 0, 0)

@@ -21,7 +21,7 @@ export function buildVehicleOperationalStatus(
   schedule?: VehicleScheduleContext,
 ): VehicleOperationalStatus {
   const estimatedArrivalAt = eta?.future_time.service.trip_end.estimated_at ?? null
-  const plannedArrivalAt = schedule?.planned_end_at ?? null
+  const plannedArrivalAt = schedule?.planned_end_at ?? eta?.planned_trip_end_at ?? null
   if (!estimatedArrivalAt || !plannedArrivalAt) {
     return { status: 'no_reference', delaySeconds: null, estimatedArrivalAt, plannedArrivalAt }
   }

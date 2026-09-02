@@ -117,3 +117,39 @@ async def test_query_rejects_stale_snapshot() -> None:
 
     assert response.status == "stale"
     assert response.plans == []
+
+
+@pytest.mark.asyncio
+async def test_query_uses_each_fresh_vehicle_snapshot_independently() -> None:
+    fresh_rows = [
+        row(
+            "A",
+            arrival_at=NOW + timedelta(minutes=35),
+            next_planned_time="00:55",
+        ),
+        row(
+            "B",
+            arrival_at=NOW - timedelta(minutes=5),
+            next_planned_time="01:15",
+        ),
+    ]
+    stale_row = row(
+        "C",
+        arrival_at=NOW + timedelta(minutes=15),
+        next_planned_time="01:35",
+    )
+    stale_row["generated_at"] = NOW - timedelta(minutes=11)
+
+    response = await query_vehicle_swap_prescriptions(
+        FakeSession([*fresh_rows, stale_row]),  # type: ignore[arg-type]
+        evaluated_at=NOW,
+    )
+
+    assert response.status == "ready"
+    assert response.snapshot_generated_at == NOW
+    assert response.eligible_vehicle_count == 2
+    assert response.plan_count == 1
+    assert {
+        assignment.commitment_vehicle_prefix: assignment.assigned_vehicle_prefix
+        for assignment in response.plans[0].assignments
+    } == {"A": "B", "B": "A"}

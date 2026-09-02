@@ -143,12 +143,14 @@ export interface EtaScenario {
 
 export interface VehicleEta {
   queried_at: string
+  calculation_mode: 'enriched' | 'planned_baseline'
   vehicle_prefix: string
   trip_id: string
   route_id: string
   direction_id: number
   next_stop_id: string
   terminal_stop_id: string
+  planned_trip_end_at: string | null
   remaining_segment_count: number
   current_time: EtaScenario
   future_time: EtaScenario

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.segment_aggregation import operational_service_date
 from app.services.segment_estimate_catalog import (
     SegmentEstimateCatalog,
     load_segment_estimate_catalog,
@@ -19,6 +21,8 @@ from app.services.vehicle_eta import (
     RemainingTripSegment,
     compose_eta_projection,
 )
+
+_OPERATIONAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 
 class VehicleNotFoundError(LookupError):
@@ -37,11 +41,28 @@ class VehicleEtaResult:
     direction_id: int
     next_stop_id: str
     terminal_stop_id: str
+    planned_trip_end_at: datetime | None
     remaining_segment_count: int
     current_time_physical: EtaProjection
     current_time_service: EtaProjection
     future_time_physical: EtaProjection
     future_time_service: EtaProjection
+
+
+def planned_trip_end_at(
+    *,
+    arrival_seconds: int | None,
+    queried_at: datetime,
+) -> datetime | None:
+    if arrival_seconds is None or arrival_seconds < 0:
+        return None
+    service_date = operational_service_date(queried_at)
+    local_midnight = datetime.combine(
+        service_date,
+        time.min,
+        tzinfo=_OPERATIONAL_TIMEZONE,
+    )
+    return local_midnight + timedelta(seconds=arrival_seconds)
 
 
 def validate_vehicle_eta_state(
@@ -162,6 +183,10 @@ async def compose_vehicle_eta_result(
         direction_id=state["direction_id"],
         next_stop_id=segments[0].destination_stop_id,
         terminal_stop_id=stops[-1]["stop_id"],
+        planned_trip_end_at=planned_trip_end_at(
+            arrival_seconds=stops[-1]["arrival_seconds"],
+            queried_at=queried_at,
+        ),
         remaining_segment_count=len(segments),
         current_time_physical=projections[("current_time", "physical")],
         current_time_service=projections[("current_time", "service")],
