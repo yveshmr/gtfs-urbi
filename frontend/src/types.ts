@@ -6,6 +6,7 @@ export interface ProjectedVehiclePosition {
   longitude: number
   position_source: 'projected'
   gps_direction: number | null
+  route_bearing_degrees: number | null
   speed_kmh: number | null
   low_speed_since: string | null
   current_line: string | null
@@ -30,7 +31,57 @@ export interface ProjectedVehiclePosition {
 export interface FleetPositionResponse {
   generated_at: string
   count: number
+  monitored_count: number
+  signal_window_seconds: number
+  classification_counts: Record<string, number>
   vehicles: ProjectedVehiclePosition[]
+  raw_vehicles: RawVehiclePosition[]
+}
+
+export type RawVehicleOperationalClass =
+  | 'missing_planned_time' | 'ambiguous' | 'collecting' | 'no_exact_match' | 'other'
+
+export interface RawVehiclePosition {
+  vehicle_prefix: string
+  source_timestamp: string
+  latitude: number
+  longitude: number
+  position_source: 'gps'
+  gps_direction: number | null
+  speed_kmh: number | null
+  current_line: string | null
+  current_planned_time: string | null
+  next_line: string | null
+  next_trip_destination: string | null
+  correlation_status: string | null
+  correlation_reason: string | null
+  map_match_status: string
+  operational_class: RawVehicleOperationalClass
+}
+
+export interface SegmentSpeedMapItem {
+  segment_id: string
+  origin_stop_id: string
+  origin_stop_name: string
+  destination_stop_id: string
+  destination_stop_name: string
+  distance_m: number
+  speed_kmh: number
+  duration_seconds: number
+  source: 'live' | 'historical' | 'gtfs_planned'
+  reliability: number
+  sample_count: number
+  window_start: string | null
+  window_end: string | null
+  historical_offset_minutes: number | null
+  geometry: LineGeometry
+}
+
+export interface SegmentSpeedMapResponse {
+  generated_at: string
+  count: number
+  source_counts: Record<string, number>
+  segments: SegmentSpeedMapItem[]
 }
 
 export interface TripStop {

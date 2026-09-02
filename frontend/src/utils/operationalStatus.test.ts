@@ -47,6 +47,16 @@ describe('buildVehicleOperationalStatus', () => {
     expect(buildVehicleOperationalStatus(etaAt('2026-08-31T13:10:00-03:00'), schedule).status).toBe('warning')
   })
 
+  it('usa o ETA futuro por serviço para a cor operacional', () => {
+    const eta = etaAt('2026-08-31T13:10:01-03:00')
+    eta.current_time.service.trip_end = {
+      ...eta.current_time.service.trip_end,
+      estimated_at: '2026-08-31T13:00:00-03:00',
+    }
+
+    expect(buildVehicleOperationalStatus(eta, schedule).status).toBe('delayed')
+  })
+
   it('mantém sem referência quando não há chegada planejada', () => {
     expect(buildVehicleOperationalStatus(etaAt('2026-08-31T13:00:00-03:00'), undefined).status).toBe('no_reference')
   })

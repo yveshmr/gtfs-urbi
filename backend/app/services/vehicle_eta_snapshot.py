@@ -28,6 +28,8 @@ from app.services.vehicle_eta_query import (
     validate_vehicle_eta_state,
 )
 
+_MAX_SNAPSHOT_AGE = timedelta(minutes=10)
+
 
 @dataclass(frozen=True, slots=True)
 class VehicleEtaSnapshotRefreshResult:
@@ -208,16 +210,16 @@ async def query_vehicle_eta_snapshots(
         )
 
     result = await session.execute(
-        select(VehicleEtaSnapshot.payload)
-        .where(VehicleEtaSnapshot.generated_at == latest_generated_at)
+        select(VehicleEtaSnapshot.payload, VehicleEtaSnapshot.generated_at)
+        .where(VehicleEtaSnapshot.generated_at >= func.now() - _MAX_SNAPSHOT_AGE)
         .order_by(VehicleEtaSnapshot.vehicle_prefix)
     )
     vehicles = [
         VehicleEtaSnapshotResponse(
-            **payload,
-            generated_at=latest_generated_at,
+            **row.payload,
+            generated_at=row.generated_at,
         )
-        for payload in result.scalars()
+        for row in result
     ]
     return VehicleEtaSnapshotListResponse(
         generated_at=latest_generated_at,

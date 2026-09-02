@@ -111,6 +111,11 @@ def build_remaining_trip_segments(
                 origin_stop_sequence=origin["stop_sequence"],
                 destination_stop_sequence=destination["stop_sequence"],
                 remaining_fraction=remaining_fraction if index == 0 else 1.0,
+                planned_duration_seconds=(
+                    destination["arrival_seconds"] - origin["departure_seconds"]
+                    if destination["arrival_seconds"] > origin["departure_seconds"]
+                    else None
+                ),
             )
         )
     if not segments:

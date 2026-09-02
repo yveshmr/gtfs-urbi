@@ -120,7 +120,13 @@ class SegmentEstimateCatalog:
             )
             if candidate is not None:
                 return candidate
-        return None
+        if segment.planned_duration_seconds is None:
+            return None
+        return EstimateCandidate(
+            value_seconds=segment.planned_duration_seconds,
+            reliability=1.0,
+            sample_count=1,
+        )
 
 
 async def load_segment_estimate_catalog(

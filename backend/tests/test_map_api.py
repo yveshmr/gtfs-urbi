@@ -19,7 +19,11 @@ def test_map_vehicle_endpoint_uses_projected_position_query(monkeypatch) -> None
         return_value={
             "generated_at": datetime(2026, 8, 30, 12, tzinfo=UTC),
             "count": 0,
+            "monitored_count": 0,
+            "signal_window_seconds": 60,
+            "classification_counts": {"projected": 0},
             "vehicles": [],
+            "raw_vehicles": [],
         }
     )
     monkeypatch.setattr(map_module, "query_projected_vehicle_positions", query)

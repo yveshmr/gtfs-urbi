@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.map import (
     ProjectedVehiclePositionListResponse,
     ProjectedVehiclePositionResponse,
+    RawVehiclePositionResponse,
     TripGeometryResponse,
     TripStopGeometryResponse,
 )
@@ -26,6 +27,83 @@ async def query_projected_vehicle_positions(
 ) -> ProjectedVehiclePositionListResponse:
     if generated_at.tzinfo is None:
         raise ValueError("The map timestamp must include a timezone.")
+    classification_result = await session.execute(
+        text(
+            """
+            WITH classified AS (
+                SELECT CASE
+                    WHEN map_match_status = 'resolved'
+                     AND projected_location IS NOT NULL
+                     AND projected_at IS NOT NULL
+                     AND projection_quality IN ('valid', 'reduced')
+                     AND trip_id IS NOT NULL AND route_id IS NOT NULL
+                     AND shape_id IS NOT NULL AND shape_position IS NOT NULL
+                     AND shape_progress_m IS NOT NULL AND distance_to_shape_m IS NOT NULL
+                      THEN 'projected'
+                    WHEN current_planned_time IS NULL
+                      OR btrim(current_planned_time) = '' THEN 'missing_planned_time'
+                    WHEN map_match_status = 'ambiguous' THEN 'ambiguous'
+                    WHEN correlation_reason IN ('no_exact_match', 'ambiguous_exact_match')
+                      THEN 'no_exact_match'
+                    WHEN map_match_status = 'collecting' THEN 'collecting'
+                    ELSE 'other'
+                END AS operational_class
+                FROM realtime.vehicle_current_states
+                WHERE source_timestamp >= :signal_cutoff
+            )
+            SELECT operational_class, COUNT(*) AS vehicle_count
+            FROM classified
+            GROUP BY operational_class
+            """
+        ),
+        {"signal_cutoff": generated_at - timedelta(seconds=60)},
+    )
+    classification_counts = {
+        "projected": 0,
+        "missing_planned_time": 0,
+        "ambiguous": 0,
+        "collecting": 0,
+        "no_exact_match": 0,
+        "other": 0,
+    }
+    for row in classification_result.mappings():
+        classification_counts[row["operational_class"]] = int(row["vehicle_count"])
+    monitored_count = sum(classification_counts.values())
+
+    raw_result = await session.execute(
+        text(
+            """
+            SELECT vehicle_prefix, source_timestamp, latitude, longitude,
+                   gps_direction, speed_kmh, current_line, current_planned_time,
+                   next_line, next_trip_destination, correlation_status,
+                   correlation_reason, map_match_status,
+                   CASE
+                     WHEN current_planned_time IS NULL OR btrim(current_planned_time) = ''
+                       THEN 'missing_planned_time'
+                     WHEN map_match_status = 'ambiguous' THEN 'ambiguous'
+                     WHEN correlation_reason IN ('no_exact_match', 'ambiguous_exact_match')
+                       THEN 'no_exact_match'
+                     WHEN map_match_status = 'collecting' THEN 'collecting'
+                     ELSE 'other'
+                   END AS operational_class
+            FROM realtime.vehicle_current_states
+            WHERE source_timestamp >= :signal_cutoff
+              AND latitude IS NOT NULL AND longitude IS NOT NULL
+              AND NOT (
+                map_match_status = 'resolved'
+                AND projected_location IS NOT NULL
+                AND projected_at IS NOT NULL
+                AND projection_quality IN ('valid', 'reduced')
+                AND trip_id IS NOT NULL AND route_id IS NOT NULL
+                AND shape_id IS NOT NULL AND shape_position IS NOT NULL
+                AND shape_progress_m IS NOT NULL AND distance_to_shape_m IS NOT NULL
+              )
+            ORDER BY vehicle_prefix
+            """
+        ),
+        {"signal_cutoff": generated_at - timedelta(seconds=60)},
+    )
+    raw_vehicles = [RawVehiclePositionResponse(**dict(row)) for row in raw_result.mappings()]
     result = await session.execute(
         text(
             """
@@ -36,6 +114,7 @@ async def query_projected_vehicle_positions(
                 ST_Y(vehicle.projected_location) AS latitude,
                 ST_X(vehicle.projected_location) AS longitude,
                 vehicle.gps_direction,
+                current_segment.bearing_degrees AS route_bearing_degrees,
                 vehicle.speed_kmh,
                 vehicle.low_speed_since,
                 vehicle.current_line,
@@ -68,7 +147,26 @@ async def query_projected_vehicle_positions(
             LEFT JOIN core.gtfs_stops AS destination
               ON destination.feed_id = vehicle.feed_id
              AND destination.stop_id = vehicle.current_destination_stop_id
+            LEFT JOIN LATERAL (
+                SELECT segment.bearing_degrees
+                FROM core.gtfs_shape_segments AS segment
+                WHERE segment.feed_id = vehicle.feed_id
+                  AND segment.shape_id = vehicle.shape_id
+                ORDER BY
+                    CASE
+                        WHEN vehicle.shape_progress_m BETWEEN
+                             segment.start_distance_m AND segment.end_distance_m
+                          THEN 0
+                        ELSE LEAST(
+                            ABS(vehicle.shape_progress_m - segment.start_distance_m),
+                            ABS(vehicle.shape_progress_m - segment.end_distance_m)
+                        )
+                    END,
+                    segment.segment_sequence
+                LIMIT 1
+            ) AS current_segment ON TRUE
             WHERE vehicle.map_match_status = 'resolved'
+              AND vehicle.source_timestamp >= :signal_cutoff
               AND vehicle.projected_location IS NOT NULL
               AND vehicle.projected_at IS NOT NULL
               AND vehicle.projection_quality IN ('valid', 'reduced')
@@ -81,7 +179,8 @@ async def query_projected_vehicle_positions(
               AND vehicle.distance_to_shape_m IS NOT NULL
             ORDER BY vehicle.vehicle_prefix
             """
-        )
+        ),
+        {"signal_cutoff": generated_at - timedelta(seconds=60)},
     )
     vehicles = [
         ProjectedVehiclePositionResponse(**dict(row)) for row in result.mappings()
@@ -89,7 +188,11 @@ async def query_projected_vehicle_positions(
     return ProjectedVehiclePositionListResponse(
         generated_at=generated_at,
         count=len(vehicles),
+        monitored_count=monitored_count,
+        signal_window_seconds=60,
+        classification_counts=classification_counts,
         vehicles=vehicles,
+        raw_vehicles=raw_vehicles,
     )
 
 

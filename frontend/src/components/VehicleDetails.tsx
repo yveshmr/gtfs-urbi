@@ -25,6 +25,7 @@ import {
 } from '../utils/format'
 import type { VehicleOperationalStatus } from '../utils/operationalStatus'
 import type { VehicleAlerts } from '../utils/vehicleAlerts'
+import { EtaSourceMix } from './EtaSourceMix'
 
 interface VehicleDetailsProps {
   vehicle: ProjectedVehiclePosition
@@ -36,17 +37,6 @@ interface VehicleDetailsProps {
   loading: boolean
   error: string | null
   onClose: () => void
-}
-
-function dominantSource(target: EtaTarget | undefined) {
-  if (!target) return '—'
-  const source = Object.entries(target.source_counts).sort((first, second) => second[1] - first[1])[0]
-  const labels: Record<string, string> = {
-    live: 'Tempo realizado',
-    historical: 'Histórico',
-    gtfs_planned: 'GTFS planejado',
-  }
-  return source ? (labels[source[0]] ?? source[0]) : 'Sem fonte'
 }
 
 function EtaCard({ label, target, accent }: { label: string; target?: EtaTarget; accent: string }) {
@@ -62,7 +52,7 @@ function EtaCard({ label, target, accent }: { label: string; target?: EtaTarget;
       <div className="reliability-track">
         <span style={{ width: `${Math.round((target?.reliability ?? 0) * 100)}%` }} />
       </div>
-      <small>{dominantSource(target)}</small>
+      <EtaSourceMix counts={target?.source_counts} />
     </article>
   )
 }

@@ -17,6 +17,7 @@ import type {
 } from '../types'
 import { formatClock, formatMinutes, formatPercent } from '../utils/format'
 import { ColumnFilter } from './ColumnFilter'
+import { EtaSourceMix } from './EtaSourceMix'
 import { compareSortValues, SortableHeader, type SortState } from './SortableHeader'
 
 interface PrescriptionsTableProps { refreshToken: number }
@@ -150,6 +151,7 @@ function ExchangeGroupCard({
               <div className="action-time forecast"><span>Chegada prevista</span><strong>{formatClock(step.assigned_vehicle_arrival_at)}</strong><small>original {formatClock(step.commitment_vehicle_arrival_at)}</small></div>
               <div className="action-time"><span>Saída planejada</span><strong>{formatClock(step.departure_at)}</strong><small>{step.next_schedule_position ?? '—'}</small></div>
               <div className="action-time"><span>Folga</span><strong className={step.assigned_arrival_margin_seconds >= 0 ? 'saved-value' : 'delay-value baseline'}>{signedMinutes(step.assigned_arrival_margin_seconds)}</strong><small>residual {signedMinutes(step.proposed_delay_seconds)}</small></div>
+              <div className="action-source"><span>Base do ETA</span><EtaSourceMix counts={step.eta_source_counts} compact /></div>
               <div className={`action-deadline ${deadlineExpired ? 'expired' : ''}`}><span>Prazo para decisão</span><strong>{isDelayedTrip ? deadlineLabel(step.departure_at, now) : 'Sem atraso original'}</strong><small>{isDelayedTrip ? `partida ${formatClock(step.departure_at)}` : 'não exige intervenção por atraso'}</small></div>
             </div>
           )
@@ -335,7 +337,7 @@ export function PrescriptionsTable({ refreshToken }: PrescriptionsTableProps) {
                   <td>{formatClock(row.commitment_vehicle_arrival_at)}</td><td>{formatClock(row.assigned_vehicle_arrival_at)}</td>
                   <td><span className={row.assigned_arrival_margin_seconds >= 0 ? 'saved-value' : 'delay-value baseline'}>{signedMinutes(row.assigned_arrival_margin_seconds)}</span></td>
                   <td><span className="delay-value baseline">{signedMinutes(row.baseline_delay_seconds)}</span></td><td><span className="delay-value proposed">{signedMinutes(row.proposed_delay_seconds)}</span></td>
-                  <td><strong className="saved-value">{formatMinutes(row.delay_reduction_seconds)}</strong></td><td>{formatPercent(row.eta_reliability)}</td>
+                  <td><strong className="saved-value">{formatMinutes(row.delay_reduction_seconds)}</strong></td><td className="confidence-cell"><strong>{formatPercent(row.eta_reliability)}</strong><EtaSourceMix counts={row.eta_source_counts} compact /></td>
                   <td>{row.protected ? <span className="protected-badge">Protegido</span> : 'Livre'}</td><td><DecisionStatusBadge status={status} /></td>
                 </tr>
               })}

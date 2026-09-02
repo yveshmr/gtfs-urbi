@@ -115,3 +115,22 @@ def test_catalog_uses_first_planned_slot_with_equal_trip_weight() -> None:
     assert result.value_seconds == 90
     assert result.reliability == 1
     assert result.sample_count == 2
+
+
+def test_catalog_uses_own_trip_duration_when_planned_window_is_empty() -> None:
+    segment = RemainingTripSegment(
+        "A",
+        "B",
+        1,
+        2,
+        planned_duration_seconds=135,
+    )
+
+    result = empty_catalog().resolve(
+        segment, NOW, "service", route_id="route", direction_id=0
+    )
+
+    assert result.source == "gtfs_planned"
+    assert result.value_seconds == 135
+    assert result.reliability == 1
+    assert result.sample_count == 1

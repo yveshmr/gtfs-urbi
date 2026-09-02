@@ -12,6 +12,7 @@ class ProjectedVehiclePositionResponse(BaseModel):
     longitude: float
     position_source: Literal["projected"] = "projected"
     gps_direction: float | None
+    route_bearing_degrees: float | None
     speed_kmh: float | None
     low_speed_since: datetime | None
     current_line: str | None
@@ -33,10 +34,63 @@ class ProjectedVehiclePositionResponse(BaseModel):
     current_destination_stop_name: str | None
 
 
+class RawVehiclePositionResponse(BaseModel):
+    vehicle_prefix: str
+    source_timestamp: datetime
+    latitude: float
+    longitude: float
+    position_source: Literal["gps"] = "gps"
+    gps_direction: float | None
+    speed_kmh: float | None
+    current_line: str | None
+    current_planned_time: str | None
+    next_line: str | None
+    next_trip_destination: str | None
+    correlation_status: str | None
+    correlation_reason: str | None
+    map_match_status: str
+    operational_class: Literal[
+        "missing_planned_time",
+        "ambiguous",
+        "collecting",
+        "no_exact_match",
+        "other",
+    ]
+
+
 class ProjectedVehiclePositionListResponse(BaseModel):
     generated_at: datetime
     count: int
+    monitored_count: int
+    signal_window_seconds: int
+    classification_counts: dict[str, int]
     vehicles: list[ProjectedVehiclePositionResponse]
+    raw_vehicles: list[RawVehiclePositionResponse]
+
+
+class SegmentSpeedMapItem(BaseModel):
+    segment_id: str
+    origin_stop_id: str
+    origin_stop_name: str
+    destination_stop_id: str
+    destination_stop_name: str
+    distance_m: float
+    speed_kmh: float
+    duration_seconds: float
+    source: Literal["live", "historical", "gtfs_planned"]
+    reliability: float
+    sample_count: int
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    historical_offset_minutes: int | None = None
+    geometry: dict[str, Any]
+
+
+class SegmentSpeedMapResponse(BaseModel):
+    generated_at: datetime
+    count: int
+    source_counts: dict[str, int]
+    segments: list[SegmentSpeedMapItem]
 
 
 class TripStopGeometryResponse(BaseModel):

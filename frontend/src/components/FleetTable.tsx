@@ -13,6 +13,7 @@ import { formatClock, formatMinutes, formatPercent } from '../utils/format'
 import { classifyVehicleDelay } from '../utils/operationalStatus'
 import { buildVehicleAlerts, type VehicleAlerts } from '../utils/vehicleAlerts'
 import { ColumnFilter } from './ColumnFilter'
+import { EtaSourceMix } from './EtaSourceMix'
 import { compareSortValues, SortableHeader, type SortState } from './SortableHeader'
 
 interface FleetTableProps {
@@ -67,13 +68,6 @@ function sortValue(row: FleetRow, key: FilterKey): unknown {
     updated: vehicle.source_timestamp,
   }
   return values[key]
-}
-
-function sourceLabel(snapshot: VehicleEtaSnapshot | undefined) {
-  const counts = snapshot?.current_time.service.trip_end.source_counts
-  if (!counts) return '—'
-  const source = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
-  return source?.replaceAll('_', ' ') ?? '—'
 }
 
 function differenceSeconds(later?: string | null, earlier?: string | null) {
@@ -244,7 +238,7 @@ export function FleetTable({
                   <td><span className={`delay-value ${arrivalDelay != null && arrivalDelay > 0 ? 'baseline' : 'proposed'}`}>{signedMinutes(arrivalDelay)}</span></td>
                   <td>{signedMinutes(departureDelay)}</td><td><span className={`operation-status ${statusKey}`}>{status}</span>{alerts.stale && <small className="vehicle-alert-badge stale">Sem atualização há {formatMinutes(alerts.sourceAgeSeconds)}</small>}{alerts.lowSpeed && <small className="vehicle-alert-badge low-speed">Abaixo de 1 km/h há {formatMinutes(alerts.lowSpeedDurationSeconds)}</small>}</td>
                   <td>{vehicle.speed_kmh == null ? '—' : `${Math.round(vehicle.speed_kmh)} km/h`}</td>
-                  <td><span className={`quality-badge ${vehicle.projection_quality}`}>{formatPercent(confidence)}</span><small>{sourceLabel(eta)}</small></td>
+                  <td className="confidence-cell"><span className={`quality-badge ${vehicle.projection_quality}`}>{formatPercent(confidence)}</span><EtaSourceMix counts={eta?.current_time.service.trip_end.source_counts} compact /></td>
                   <td>{formatClock(vehicle.source_timestamp)}</td>
                   <td><button className="row-action" onClick={() => onOpenVehicle(vehicle.vehicle_prefix)} title="Abrir no mapa"><ExternalLink size={15} /></button></td>
                 </tr>

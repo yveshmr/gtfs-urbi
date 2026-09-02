@@ -6,17 +6,17 @@ import {
   BusFront,
   Clock3,
   DatabaseZap,
-  MapPinned,
   ShieldAlert,
   Sparkles,
   TrendingDown,
 } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 
 import type {
   ProjectedVehiclePosition,
   SwapDecision,
   VehicleScheduleContext,
+  VehicleEtaSnapshot,
   VehicleSwapPrescription,
 } from '../types'
 import { formatClock, formatMinutes, formatPercent } from '../utils/format'
@@ -25,6 +25,7 @@ import type {
   VehicleOperationalStatus,
 } from '../utils/operationalStatus'
 import type { VehicleAlerts } from '../utils/vehicleAlerts'
+import { EtaSourceMix } from './EtaSourceMix'
 
 interface OverviewDashboardProps {
   vehicles: ProjectedVehiclePosition[]
@@ -33,9 +34,10 @@ interface OverviewDashboardProps {
   scheduleByVehicle: Map<string, VehicleScheduleContext>
   prescription: VehicleSwapPrescription | null
   decisions: SwapDecision[]
-  generatedAt?: string | null
-  map: ReactNode
-  onOpenVehicle: (vehiclePrefix: string) => void
+  monitoredCount: number
+  signalWindowSeconds: number
+  classificationCounts: Record<string, number>
+  etaByVehicle: Map<string, VehicleEtaSnapshot>
   onOpenFleet: (status?: string) => void
   onOpenPrescriptions: () => void
 }
@@ -60,9 +62,10 @@ export function OverviewDashboard({
   scheduleByVehicle,
   prescription,
   decisions,
-  generatedAt,
-  map,
-  onOpenVehicle,
+  monitoredCount,
+  signalWindowSeconds,
+  classificationCounts,
+  etaByVehicle,
   onOpenFleet,
   onOpenPrescriptions,
 }: OverviewDashboardProps) {
@@ -100,12 +103,6 @@ export function OverviewDashboard({
   const staleCount = filteredVehicles.filter((vehicle) => alertsByVehicle.get(vehicle.vehicle_prefix)?.stale).length
   const lowSpeedCount = filteredVehicles.filter((vehicle) => alertsByVehicle.get(vehicle.vehicle_prefix)?.lowSpeed).length
 
-  const priorities = useMemo(() => filteredVehicles
-    .map((vehicle) => ({ vehicle, status: statusByVehicle.get(vehicle.vehicle_prefix) }))
-    .filter((item) => item.status?.delaySeconds != null && item.status.delaySeconds > 0)
-    .sort((first, second) => (second.status?.delaySeconds ?? 0) - (first.status?.delaySeconds ?? 0))
-    .slice(0, 6), [filteredVehicles, statusByVehicle])
-
   const delayedLines = useMemo(() => {
     const aggregate = new Map<string, { count: number; totalDelay: number }>()
     filteredVehicles.forEach((vehicle) => {
@@ -129,12 +126,6 @@ export function OverviewDashboard({
   const pendingGroups = groups.filter((group) => !finalDecisionKeys.has(group.execution_key))
   const threatenedTrips = (prescription?.plans ?? []).reduce((total, plan) =>
     total + plan.assignments.filter((item) => item.baseline_delay_seconds > 10 * 60).length, 0)
-  const baselineDelay = (prescription?.plans ?? []).reduce(
-    (total, plan) => total + plan.baseline_total_delay_seconds, 0,
-  )
-  const proposedDelay = (prescription?.plans ?? []).reduce(
-    (total, plan) => total + plan.proposed_total_delay_seconds, 0,
-  )
   const criticalTerminals = [...(prescription?.plans ?? [])]
     .sort((first, second) => second.baseline_total_delay_seconds - first.baseline_total_delay_seconds)
     .slice(0, 5)
@@ -143,6 +134,11 @@ export function OverviewDashboard({
     .slice(0, 4)
   const maxTerminalDelay = Math.max(1, ...criticalTerminals.map((plan) => plan.baseline_total_delay_seconds))
   const hasFleetFilters = Boolean(lineFilter || terminalFilter || statusFilter)
+  const sourceCounts = filteredVehicles.reduce<Record<string, number>>((counts, vehicle) => {
+    const sources = etaByVehicle.get(vehicle.vehicle_prefix)?.current_time.service.trip_end.source_counts ?? {}
+    Object.entries(sources).forEach(([source, count]) => { counts[source] = (counts[source] ?? 0) + count })
+    return counts
+  }, {})
 
   return (
     <section className="manager-overview" aria-label="Visão gerencial da operação">
@@ -162,7 +158,7 @@ export function OverviewDashboard({
       </div>}
 
       <div className="manager-kpi-grid">
-        <button className="manager-kpi blue" onClick={() => onOpenFleet()}><BusFront size={19} /><span>Frota monitorada<strong>{filteredVehicles.length}</strong><small>{vehicles.length} veículos no total</small></span></button>
+        <button className="manager-kpi blue" onClick={() => onOpenFleet()}><BusFront size={19} /><span>Frota monitorada<strong>{monitoredCount}</strong><small>ao menos 1 sinal nos últimos {signalWindowSeconds}s</small></span></button>
         <button className="manager-kpi green" onClick={() => onOpenFleet('No horário / adiantado')}><TrendingDown size={19} /><span>Pontualidade ETA<strong>{formatPercent(punctuality)}</strong><small>{statusCounts.on_time} de {referenceCount} com referência</small></span></button>
         <button className="manager-kpi orange" onClick={() => onOpenFleet('Atenção')}><Clock3 size={19} /><span>Atenção<strong>{statusCounts.warning}</strong><small>atraso previsto até 10 min</small></span></button>
         <button className="manager-kpi red" onClick={() => onOpenFleet('Atraso crítico')}><AlertTriangle size={19} /><span>Atrasos críticos<strong>{statusCounts.delayed}</strong><small>acima de 10 minutos</small></span></button>
@@ -172,27 +168,21 @@ export function OverviewDashboard({
         <button className="manager-kpi green" onClick={onOpenPrescriptions}><Sparkles size={19} /><span>Tempo recuperável<strong>{formatMinutes(prescription?.total_saved_delay_seconds)}</strong><small>com as prescrições atuais</small></span></button>
       </div>
 
-      <div className="overview-operation-grid">
-        <article className="overview-map-panel">
-          <header><div><span className="eyebrow">Distribuição espacial</span><h2>Mapa operacional</h2></div><button onClick={() => onOpenFleet()}>Abrir frota <ArrowRight size={14} /></button></header>
-          <div className="overview-map-frame">{map}</div>
-        </article>
-
-        <article className="overview-priority-panel">
-          <header><div><span className="eyebrow">Ação imediata</span><h2>Prioridades da frota</h2></div><span>Atualizado {formatClock(generatedAt)}</span></header>
-          <div className="priority-list">
-            {priorities.map(({ vehicle, status }, index) => <button key={vehicle.vehicle_prefix} onClick={() => onOpenVehicle(vehicle.vehicle_prefix)}>
-              <span className={`priority-rank ${status?.status}`}>{index + 1}</span>
-              <span><strong>{vehicle.vehicle_prefix}</strong><small>Linha {scheduleByVehicle.get(vehicle.vehicle_prefix)?.line ?? vehicle.route_short_name ?? '—'} · {scheduleByVehicle.get(vehicle.vehicle_prefix)?.destination_name ?? vehicle.headsign ?? 'Destino não informado'}</small></span>
-              <span className="priority-delay"><strong>{minutesSigned(status?.delaySeconds ?? null)}</strong><small>ETA {formatClock(status?.estimatedArrivalAt)}</small></span>
-              <ArrowRight size={15} />
-            </button>)}
-            {!priorities.length && <div className="overview-empty"><TrendingDown size={22} /><strong>Nenhum atraso no recorte atual</strong></div>}
-          </div>
-        </article>
+      <div className="communication-summary-row" aria-label="Classificação dos carros comunicantes">
+        <article className="communication-total"><span>Carros comunicantes</span><strong>{monitoredCount}</strong><small>ao menos um sinal nos últimos {signalWindowSeconds}s</small></article>
+        <article className="projected"><span>Projetados</span><strong>{classificationCounts.projected ?? 0}</strong><small>viagem e posição resolvidas</small></article>
+        <article className="missing"><span>Sem viagem planejada</span><strong>{classificationCounts.missing_planned_time ?? 0}</strong><small>posição GPS exibida</small></article>
+        <article className="ambiguous"><span>Map matching ambíguo</span><strong>{classificationCounts.ambiguous ?? 0}</strong><small>posição GPS exibida</small></article>
+        <article className="collecting"><span>Coletando movimento</span><strong>{classificationCounts.collecting ?? 0}</strong><small>aguardando consolidação</small></article>
+        <article className="unmatched"><span>Sem correspondência GTFS</span><strong>{(classificationCounts.no_exact_match ?? 0) + (classificationCounts.other ?? 0)}</strong><small>dados insuficientes ou sem chave</small></article>
       </div>
 
       <div className="manager-analysis-grid">
+        <article className="manager-panel source-composition-panel">
+          <header><div><span className="eyebrow">Base das estimativas</span><h2>Composição do ETA</h2></div></header>
+          <p>Participação dos trechos restantes no ETA da frota exibida.</p>
+          <EtaSourceMix counts={sourceCounts} />
+        </article>
         <article className="manager-panel terminal-ranking">
           <header><div><span className="eyebrow">Visão por terminal</span><h2>Terminais mais críticos</h2></div><button onClick={onOpenPrescriptions}>Ver prescrições</button></header>
           <div className="ranking-list">
@@ -209,14 +199,6 @@ export function OverviewDashboard({
           </div>
         </article>
 
-        <article className="manager-panel prescription-impact">
-          <header><div><span className="eyebrow">Resultado potencial</span><h2>Impacto das prescrições</h2></div></header>
-          <div className="impact-comparison">
-            <div><span>Sem intervenção</span><strong>{formatMinutes(baselineDelay)}</strong><i><b style={{ width: '100%' }} /></i></div>
-            <div><span>Após recomendação</span><strong>{formatMinutes(proposedDelay)}</strong><i><b style={{ width: `${baselineDelay ? Math.max(3, Math.round((proposedDelay / baselineDelay) * 100)) : 0}%` }} /></i></div>
-          </div>
-          <div className="impact-result"><TrendingDown size={18} /><span><small>Redução potencial</small><strong>{formatMinutes(Math.max(0, baselineDelay - proposedDelay))}</strong></span></div>
-        </article>
       </div>
 
       <article className="urgent-actions-panel">

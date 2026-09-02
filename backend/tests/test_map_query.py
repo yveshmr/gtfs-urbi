@@ -28,6 +28,9 @@ class FakeResult:
     def mappings(self) -> FakeMappings:
         return FakeMappings(self.rows)
 
+    def scalar_one(self) -> object:
+        return next(iter(self.rows[0].values()))
+
 
 class FakeSession:
     def __init__(self, results: list[list[dict[str, object]]]) -> None:
@@ -45,6 +48,7 @@ def projected_vehicle_row() -> dict[str, object]:
         "latitude": -15.8,
         "longitude": -48.0,
         "gps_direction": 90.0,
+        "route_bearing_degrees": 88.0,
         "speed_kmh": 35.0,
         "low_speed_since": None,
         "current_line": "100",
@@ -70,13 +74,24 @@ def projected_vehicle_row() -> dict[str, object]:
 @pytest.mark.asyncio
 async def test_projected_vehicle_query_builds_lightweight_map_response() -> None:
     response = await query_projected_vehicle_positions(
-        FakeSession([[projected_vehicle_row()]]),  # type: ignore[arg-type]
+        FakeSession(
+            [
+                [{"operational_class": "projected", "vehicle_count": 3}],
+                [],
+                [projected_vehicle_row()],
+            ]
+        ),  # type: ignore[arg-type]
         generated_at=NOW,
     )
 
     assert response.count == 1
+    assert response.monitored_count == 3
+    assert response.signal_window_seconds == 60
+    assert response.classification_counts["projected"] == 3
+    assert response.raw_vehicles == []
     assert response.vehicles[0].position_source == "projected"
     assert response.vehicles[0].trip_id == "trip-1"
+    assert response.vehicles[0].route_bearing_degrees == 88.0
     assert response.vehicles[0].current_destination_stop_name == "Parada B"
 
 

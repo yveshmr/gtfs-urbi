@@ -19,10 +19,13 @@ class RemainingTripSegment:
     origin_stop_sequence: int
     destination_stop_sequence: int
     remaining_fraction: float = 1.0
+    planned_duration_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if not 0 <= self.remaining_fraction <= 1:
             raise ValueError("Remaining segment fraction must be between zero and one.")
+        if self.planned_duration_seconds is not None and self.planned_duration_seconds <= 0:
+            raise ValueError("Planned segment duration must be positive when provided.")
 
 
 @dataclass(frozen=True, slots=True)

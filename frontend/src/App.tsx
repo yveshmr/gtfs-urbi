@@ -46,8 +46,12 @@ import { buildVehicleAlerts } from './utils/vehicleAlerts'
 const OperationsMap = lazy(() =>
   import('./components/OperationsMap').then((module) => ({ default: module.OperationsMap })),
 )
+const SegmentSpeedMap = lazy(() =>
+  import('./components/SegmentSpeedMap').then((module) => ({ default: module.SegmentSpeedMap })),
+)
 
-type ActiveView = 'overview' | 'map' | 'fleet' | 'prescriptions'
+type ActiveView = 'overview' | 'fleetMap' | 'segmentMap' | 'fleet' | 'prescriptions'
+type FleetMapScope = 'matched' | 'all'
 
 function App() {
   const { data, error, loading, refresh } = useFleetPositions()
@@ -63,6 +67,9 @@ function App() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [query, setQuery] = useState('')
+  const [fleetMapScope, setFleetMapScope] = useState<FleetMapScope>(() =>
+    window.localStorage.getItem('gtfs-on-time-fleet-map-scope') === 'matched' ? 'matched' : 'all',
+  )
   const [etaSnapshots, setEtaSnapshots] = useState<VehicleEtaSnapshotList | null>(null)
   const [scheduleContexts, setScheduleContexts] = useState<VehicleScheduleContextList | null>(null)
   const [prescription, setPrescription] = useState<VehicleSwapPrescription | null>(null)
@@ -77,6 +84,11 @@ function App() {
   }, [])
 
   const vehicles = data?.vehicles ?? []
+  const rawVehicles = data?.raw_vehicles ?? []
+
+  useEffect(() => {
+    window.localStorage.setItem('gtfs-on-time-fleet-map-scope', fleetMapScope)
+  }, [fleetMapScope])
   const liveSelectedVehicle = useMemo(
     () => vehicles.find((vehicle) => vehicle.vehicle_prefix === selectedPrefix) ?? null,
     [selectedPrefix, vehicles],
@@ -90,8 +102,17 @@ function App() {
   }
   const selectedVehicle = liveSelectedVehicle ?? selectedVehicleSnapshot.current
   const etaByVehicle = useMemo(
-    () => new Map((etaSnapshots?.vehicles ?? []).map((item) => [item.vehicle_prefix, item])),
-    [etaSnapshots],
+    () => {
+      const currentTripByVehicle = new Map(
+        vehicles.map((vehicle) => [vehicle.vehicle_prefix, vehicle.trip_id]),
+      )
+      return new Map(
+        (etaSnapshots?.vehicles ?? [])
+          .filter((item) => currentTripByVehicle.get(item.vehicle_prefix) === item.trip_id)
+          .map((item) => [item.vehicle_prefix, item]),
+      )
+    },
+    [etaSnapshots, vehicles],
   )
   const scheduleByVehicle = useMemo(
     () => new Map((scheduleContexts?.vehicles ?? []).map((item) => [item.vehicle_prefix, item])),
@@ -217,7 +238,7 @@ function App() {
 
   const openVehicleOnMap = (prefix: string) => {
     selectVehicle(prefix)
-    setActiveView('map')
+    setActiveView('fleetMap')
   }
 
   const openFleet = (status?: string) => {
@@ -233,7 +254,8 @@ function App() {
 
   const viewCopy: Record<ActiveView, { eyebrow: string; title: string; accent: string }> = {
     overview: { eyebrow: 'Centro de controle operacional', title: 'Visão', accent: 'geral' },
-    map: { eyebrow: 'Monitoramento operacional', title: 'Frota', accent: 'em tempo real' },
+    fleetMap: { eyebrow: 'Monitoramento operacional', title: 'Mapa', accent: 'de frota' },
+    segmentMap: { eyebrow: 'Leitura da cidade', title: 'Mapa', accent: 'de trechos' },
     fleet: { eyebrow: 'Acompanhamento veículo a veículo', title: 'Tabela', accent: 'da frota' },
     prescriptions: { eyebrow: 'Otimização global por terminal', title: 'Ações', accent: 'prescritivas' },
   }
@@ -253,9 +275,7 @@ function App() {
         </button>
         <div className="brand-lockup">
           <img className="brand-urbi-logo" src={urbiLogo} alt="Urbi" />
-          <span className="powered-brand"><small>powered by</small><img src={gipeLogo} alt="GIPE" /></span>
-          <span className="brand-divider" />
-          <span className="brand-product">Operação em tempo real</span>
+          <img className="brand-gipe-logo" src={gipeLogo} alt="GIPE" />
         </div>
         <div className="topbar-context">
           <span>CCO</span><ChevronRight size={16} /><strong>Monitoramento da frota</strong>
@@ -275,7 +295,8 @@ function App() {
         inert={!sidebarOpen}
       >
         <button className={`sidebar-button ${activeView === 'overview' ? 'active' : ''}`} onClick={() => setActiveView('overview')}><LayoutDashboard size={20} /><span>Visão geral</span></button>
-        <button className={`sidebar-button ${activeView === 'map' ? 'active' : ''}`} onClick={() => setActiveView('map')}><MapPinned size={20} /><span>Mapa</span></button>
+        <button className={`sidebar-button ${activeView === 'fleetMap' ? 'active' : ''}`} onClick={() => setActiveView('fleetMap')}><MapPinned size={20} /><span>Mapa de frota</span></button>
+        <button className={`sidebar-button ${activeView === 'segmentMap' ? 'active' : ''}`} onClick={() => setActiveView('segmentMap')}><MapPinned size={20} /><span>Mapa de trechos</span></button>
         <button className={`sidebar-button ${activeView === 'fleet' ? 'active' : ''}`} onClick={() => setActiveView('fleet')}><TableProperties size={20} /><span>Frota</span></button>
         <button className={`sidebar-button ${activeView === 'prescriptions' ? 'active' : ''}`} onClick={() => setActiveView('prescriptions')}><Sparkles size={20} /><span>Prescrições</span></button>
       </nav>
@@ -286,12 +307,12 @@ function App() {
             <span className="eyebrow">{currentViewCopy.eyebrow}</span>
             <h1><span>{currentViewCopy.title}</span> {currentViewCopy.accent}</h1>
           </div>
-          <button className="refresh-button" onClick={refreshCurrentView} disabled={loading && activeView === 'map'}>
+          <button className="refresh-button" onClick={refreshCurrentView} disabled={loading && activeView === 'fleetMap'}>
             <RefreshCw size={17} className={loading ? 'spin' : ''} /> Atualizar agora
           </button>
         </div>
 
-        {activeView === 'map' && <section className="kpi-strip" aria-label="Indicadores da frota">
+        {activeView === 'fleetMap' && <section className="kpi-strip" aria-label="Indicadores da frota">
           <article className="kpi-card blue">
             <div className="kpi-icon"><BusFront size={21} /></div>
             <div><span>Veículos projetados</span><strong>{data?.count ?? '—'}</strong><small>map matching resolvido</small></div>
@@ -318,26 +339,16 @@ function App() {
             scheduleByVehicle={scheduleByVehicle}
             prescription={prescription}
             decisions={swapDecisions}
-            generatedAt={data?.generated_at}
-            onOpenVehicle={openVehicleOnMap}
+            monitoredCount={data?.monitored_count ?? 0}
+            signalWindowSeconds={data?.signal_window_seconds ?? 60}
+            classificationCounts={data?.classification_counts ?? {}}
+            etaByVehicle={etaByVehicle}
             onOpenFleet={openFleet}
             onOpenPrescriptions={() => setActiveView('prescriptions')}
-            map={(
-              <Suspense fallback={<div className="map-loading"><RefreshCw className="spin" /> Carregando mapa…</div>}>
-                <OperationsMap
-                  vehicles={vehicles}
-                  selectedVehicle={null}
-                  tripGeometry={null}
-                  operationalStatusByVehicle={operationalStatusByVehicle}
-                  alertsByVehicle={alertsByVehicle}
-                  onSelectVehicle={openVehicleOnMap}
-                />
-              </Suspense>
-            )}
           />
         )}
 
-        {activeView === 'map' && <section className="map-card">
+        {activeView === 'fleetMap' && <section className="map-card">
           <div className="map-toolbar">
             <div className="vehicle-search">
               <Search size={18} />
@@ -359,20 +370,28 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="map-legend">
-              <span><i className="legend-dot on-time" /> No horário</span>
-              <span><i className="legend-dot warning" /> Até 10 min</span>
-              <span><i className="legend-dot delayed" /> Acima de 10 min</span>
-              <span><i className="legend-dot reduced" /> Sem referência</span>
-              <span><i className="legend-ring stale" /> Sem atualização</span>
-              <span><i className="legend-ring low-speed" /> Abaixo de 1 km/h</span>
-              <span><i className="legend-line current" /> Trecho atual</span>
+            <div className="map-toolbar-controls">
+              <div className="map-legend">
+                <span><i className="legend-direction on-time" /> No horário</span>
+                <span><i className="legend-direction warning" /> Até 10 min</span>
+                <span><i className="legend-direction delayed" /> Acima de 10 min</span>
+                <span><i className="legend-direction reduced" /> Sem referência</span>
+                <span><i className="legend-ring stale" /> Sem atualização</span>
+                <span><i className="legend-ring low-speed" /> Abaixo de 1 km/h</span>
+                {fleetMapScope === 'all' && <span><i className="legend-dot unmatched" /> Sem viagem alocada</span>}
+                <span><i className="legend-line current" /> Trecho atual</span>
+              </div>
+              <div className="map-scope-filter" role="group" aria-label="Veículos exibidos no mapa">
+                <button type="button" className={fleetMapScope === 'matched' ? 'active' : ''} aria-pressed={fleetMapScope === 'matched'} onClick={() => setFleetMapScope('matched')}>Somente com match</button>
+                <button type="button" className={fleetMapScope === 'all' ? 'active' : ''} aria-pressed={fleetMapScope === 'all'} onClick={() => setFleetMapScope('all')}>Todos</button>
+              </div>
             </div>
           </div>
 
           <Suspense fallback={<div className="map-loading"><RefreshCw className="spin" /> Carregando mapa…</div>}>
             <OperationsMap
               vehicles={vehicles}
+              rawVehicles={fleetMapScope === 'all' ? rawVehicles : []}
               selectedVehicle={selectedVehicle}
               tripGeometry={geometry}
               operationalStatusByVehicle={operationalStatusByVehicle}
@@ -396,6 +415,10 @@ function App() {
             />
           )}
         </section>}
+
+        {activeView === 'segmentMap' && <Suspense fallback={<div className="map-loading"><RefreshCw className="spin" /> Carregando mapa de trechos…</div>}>
+          <SegmentSpeedMap refreshToken={viewRefreshToken} />
+        </Suspense>}
 
         {activeView === 'fleet' && (
           <FleetTable

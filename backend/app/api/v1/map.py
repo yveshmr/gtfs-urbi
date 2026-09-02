@@ -5,12 +5,17 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_database_session
-from app.schemas.map import ProjectedVehiclePositionListResponse, TripGeometryResponse
+from app.schemas.map import (
+    ProjectedVehiclePositionListResponse,
+    SegmentSpeedMapResponse,
+    TripGeometryResponse,
+)
 from app.services.map_query import (
     TripGeometryNotFoundError,
     query_projected_vehicle_positions,
     query_trip_geometry,
 )
+from app.services.segment_map_query import query_segment_speed_map
 
 router = APIRouter(prefix="/map", tags=["map"])
 
@@ -25,6 +30,15 @@ async def projected_vehicle_positions(
         session,
         generated_at=datetime.now(UTC),
     )
+
+
+@router.get("/segments", response_model=SegmentSpeedMapResponse)
+async def segment_speeds(
+    session: Annotated[AsyncSession, Depends(get_database_session)],
+    response: Response,
+) -> SegmentSpeedMapResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await query_segment_speed_map(session, generated_at=datetime.now(UTC))
 
 
 @router.get("/trips/{trip_id}/geometry", response_model=TripGeometryResponse)

@@ -1,5 +1,6 @@
 import type {
   FleetPositionResponse,
+  SegmentSpeedMapResponse,
   TripGeometry,
   VehicleEta,
   VehicleEtaSnapshotList,
@@ -46,6 +47,10 @@ async function request<T>(
 
 export function getFleetPositions(signal?: AbortSignal) {
   return request<FleetPositionResponse>('/api/v1/map/vehicles', signal)
+}
+
+export function getSegmentSpeeds(signal?: AbortSignal) {
+  return request<SegmentSpeedMapResponse>('/api/v1/map/segments', signal)
 }
 
 export function getTripGeometry(tripId: string, signal?: AbortSignal) {

@@ -6,6 +6,7 @@ import {
   Map as MapLibreMap,
   type MapLayerMouseEvent,
   NavigationControl,
+  Popup,
   setWorkerUrl,
   type SourceSpecification,
   type StyleSpecification,
@@ -13,7 +14,7 @@ import {
 import 'maplibre-gl/dist/maplibre-gl.css'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
-import type { ProjectedVehiclePosition, TripGeometry } from '../types'
+import type { ProjectedVehiclePosition, RawVehiclePosition, TripGeometry } from '../types'
 import { sliceLineBetweenFractions, splitLineAtFraction } from '../utils/geometry'
 import type { VehicleOperationalStatus } from '../utils/operationalStatus'
 import type { VehicleAlerts } from '../utils/vehicleAlerts'
@@ -22,6 +23,7 @@ setWorkerUrl(workerUrl)
 
 interface OperationsMapProps {
   vehicles: ProjectedVehiclePosition[]
+  rawVehicles: RawVehiclePosition[]
   selectedVehicle: ProjectedVehiclePosition | null
   tripGeometry: TripGeometry | null
   operationalStatusByVehicle: Map<string, VehicleOperationalStatus>
@@ -33,6 +35,7 @@ const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', feature
 type Basemap = 'neutral' | 'dark' | 'satellite'
 
 const OPENFREEMAP_DARK_STYLE = 'https://tiles.openfreemap.org/styles/dark'
+const OMT_NEUTRAL_STYLE = 'https://tiles.openfreemap.org/styles/positron'
 const STANDARD_BASEMAP_LAYERS = {
   neutral: 'osm-neutral',
   satellite: 'satellite-imagery',
@@ -44,6 +47,7 @@ const OPERATIONAL_SOURCE_IDS = [
   'trip-stops',
   'fleet-vehicles',
   'selected-vehicle',
+  'raw-vehicles',
 ] as const
 const OPERATIONAL_LAYER_IDS = [
   'completed-route-line',
@@ -51,8 +55,18 @@ const OPERATIONAL_LAYER_IDS = [
   'current-segment-line',
   'trip-stop-points',
   'fleet-vehicle-points',
+  'fleet-vehicle-stale',
+  'fleet-vehicle-low-speed-ring',
   'selected-vehicle-point',
+  'raw-vehicle-points',
 ] as const
+
+const DIRECTIONAL_MARKERS = {
+  'vehicle-direction-on-time': '#009CDF',
+  'vehicle-direction-warning': '#F2994A',
+  'vehicle-direction-delayed': '#EB5757',
+  'vehicle-direction-no-reference': '#6B7280',
+} as const
 
 const NEUTRAL_STYLE: StyleSpecification = {
   version: 8,
@@ -79,6 +93,7 @@ const NEUTRAL_STYLE: StyleSpecification = {
     'trip-stops': { type: 'geojson', data: EMPTY_COLLECTION },
     'fleet-vehicles': { type: 'geojson', data: EMPTY_COLLECTION },
     'selected-vehicle': { type: 'geojson', data: EMPTY_COLLECTION },
+    'raw-vehicles': { type: 'geojson', data: EMPTY_COLLECTION },
   },
   layers: [
     {
@@ -128,22 +143,61 @@ const NEUTRAL_STYLE: StyleSpecification = {
     },
     {
       id: 'fleet-vehicle-points',
+      type: 'symbol',
+      source: 'fleet-vehicles',
+      filter: ['!', ['get', 'stale']],
+      layout: {
+        'icon-image': [
+          'match', ['get', 'delayStatus'],
+          'delayed', 'vehicle-direction-delayed',
+          'warning', 'vehicle-direction-warning',
+          'on_time', 'vehicle-direction-on-time',
+          'vehicle-direction-no-reference',
+        ],
+        'icon-size': 0.72,
+        'icon-rotate': ['coalesce', ['get', 'routeBearing'], ['get', 'gpsDirection'], 0],
+        'icon-rotation-alignment': 'map',
+        'icon-pitch-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+    },
+    {
+      id: 'fleet-vehicle-stale',
       type: 'circle',
       source: 'fleet-vehicles',
+      filter: ['get', 'stale'],
       paint: {
         'circle-radius': 7,
-        'circle-color': [
-          'match', ['get', 'delayStatus'],
-          'delayed', '#EB5757',
-          'warning', '#F2994A',
-          'on_time', '#009CDF',
-          ['case', ['==', ['get', 'quality'], 'valid'], '#009CDF', '#F2C94C'],
-        ],
-        'circle-stroke-color': [
-          'case', ['get', 'stale'], '#6B7280', ['get', 'lowSpeed'], '#F2994A', '#FFFFFF',
-        ],
-        'circle-stroke-width': ['case', ['any', ['get', 'stale'], ['get', 'lowSpeed']], 4, 2],
-        'circle-opacity': 0.94,
+        'circle-color': '#FFFFFF',
+        'circle-opacity': 0,
+        'circle-stroke-color': '#6B7280',
+        'circle-stroke-width': 3,
+      },
+    },
+    {
+      id: 'fleet-vehicle-low-speed-ring',
+      type: 'circle',
+      source: 'fleet-vehicles',
+      filter: ['all', ['!', ['get', 'stale']], ['get', 'lowSpeed']],
+      paint: {
+        'circle-radius': 11,
+        'circle-color': '#FFFFFF',
+        'circle-opacity': 0,
+        'circle-stroke-color': '#F2994A',
+        'circle-stroke-width': 2,
+      },
+    },
+    {
+      id: 'raw-vehicle-points',
+      type: 'circle',
+      source: 'raw-vehicles',
+      paint: {
+        'circle-radius': 6,
+        'circle-color': '#6B7280',
+        'circle-stroke-color': '#FFFFFF',
+        'circle-stroke-width': 2,
+        'circle-opacity': .9,
       },
     },
     {
@@ -152,13 +206,8 @@ const NEUTRAL_STYLE: StyleSpecification = {
       source: 'selected-vehicle',
       paint: {
         'circle-radius': 11,
-        'circle-color': [
-          'match', ['get', 'delayStatus'],
-          'delayed', '#EB5757',
-          'warning', '#F2994A',
-          'on_time', '#009CDF',
-          ['case', ['==', ['get', 'quality'], 'valid'], '#009CDF', '#F2C94C'],
-        ],
+        'circle-color': '#FFFFFF',
+        'circle-opacity': 0,
         'circle-stroke-color': [
           'case', ['get', 'stale'], '#6B7280', ['get', 'lowSpeed'], '#F2994A', '#003B5C',
         ],
@@ -166,6 +215,36 @@ const NEUTRAL_STYLE: StyleSpecification = {
       },
     },
   ],
+}
+
+const RAW_CLASS_LABELS: Record<string, string> = {
+  missing_planned_time: 'Sem viagem planejada',
+  ambiguous: 'Map matching ambíguo',
+  collecting: 'Coletando movimento',
+  no_exact_match: 'Sem correspondência no GTFS',
+  other: 'Posição GPS sem projeção',
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  })[character] ?? character)
+}
+
+function rawFleetCollection(vehicles: RawVehiclePosition[]): FeatureCollection<Point> {
+  return {
+    type: 'FeatureCollection',
+    features: vehicles.map((vehicle) => ({
+      type: 'Feature', id: vehicle.vehicle_prefix,
+      geometry: { type: 'Point', coordinates: [vehicle.longitude, vehicle.latitude] },
+      properties: {
+        vehiclePrefix: vehicle.vehicle_prefix,
+        operationalClass: vehicle.operational_class,
+        operationalLabel: RAW_CLASS_LABELS[vehicle.operational_class],
+        updatedAt: vehicle.source_timestamp,
+      },
+    })),
+  }
 }
 
 function fleetCollection(
@@ -187,6 +266,8 @@ function fleetCollection(
         properties: {
           vehiclePrefix: vehicle.vehicle_prefix,
           line: vehicle.route_short_name ?? vehicle.current_line ?? 'Sem linha',
+          routeBearing: vehicle.route_bearing_degrees,
+          gpsDirection: vehicle.gps_direction,
           quality: vehicle.projection_quality,
           delayStatus: operationalStatusByVehicle.get(vehicle.vehicle_prefix)?.status ?? 'no_reference',
           stale: alerts?.stale ?? false,
@@ -210,7 +291,36 @@ function updateSource(map: MapLibreMap, sourceId: string, data: FeatureCollectio
   if (source && 'setData' in source) (source as GeoJSONSource).setData(data)
 }
 
+function directionalMarkerImage(fill: string): ImageData {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas 2D is unavailable.')
+  context.beginPath()
+  context.moveTo(32, 3)
+  context.lineTo(51, 22)
+  context.lineTo(51, 55)
+  context.lineTo(13, 55)
+  context.lineTo(13, 22)
+  context.closePath()
+  context.fillStyle = fill
+  context.fill()
+  context.lineJoin = 'round'
+  context.strokeStyle = '#FFFFFF'
+  context.lineWidth = 6
+  context.stroke()
+  return context.getImageData(0, 0, canvas.width, canvas.height)
+}
+
+function ensureDirectionalMarkerImages(map: MapLibreMap) {
+  for (const [name, color] of Object.entries(DIRECTIONAL_MARKERS)) {
+    if (!map.hasImage(name)) map.addImage(name, directionalMarkerImage(color), { pixelRatio: 2 })
+  }
+}
+
 function addOperationalLayers(map: MapLibreMap) {
+  ensureDirectionalMarkerImages(map)
   for (const sourceId of OPERATIONAL_SOURCE_IDS) {
     if (!map.getSource(sourceId)) {
       const source = NEUTRAL_STYLE.sources[sourceId] as SourceSpecification
@@ -233,6 +343,7 @@ function setStandardBasemap(map: MapLibreMap, basemap: 'neutral' | 'satellite') 
 
 export function OperationsMap({
   vehicles,
+  rawVehicles,
   selectedVehicle,
   tripGeometry,
   operationalStatusByVehicle,
@@ -241,7 +352,7 @@ export function OperationsMap({
 }: OperationsMapProps) {
   const container = useRef<HTMLDivElement | null>(null)
   const map = useRef<MapLibreMap | null>(null)
-  const styleFamily = useRef<'standard' | 'dark'>('standard')
+  const styleFamily = useRef<'neutral' | 'dark' | 'satellite'>('neutral')
   const selectHandler = useRef(onSelectVehicle)
   const fittedTrip = useRef<string | null>(null)
   const [ready, setReady] = useState(false)
@@ -257,7 +368,7 @@ export function OperationsMap({
     if (!container.current || map.current) return
     const instance = new MapLibreMap({
       container: container.current,
-      style: NEUTRAL_STYLE,
+      style: OMT_NEUTRAL_STYLE,
       center: [-47.95, -15.79],
       zoom: 10,
       attributionControl: { compact: true },
@@ -271,15 +382,32 @@ export function OperationsMap({
         if (prefix) selectHandler.current(prefix)
       }
       instance.on('click', 'fleet-vehicle-points', selectVehicle)
+      instance.on('click', 'fleet-vehicle-stale', selectVehicle)
+      instance.on('click', 'raw-vehicle-points', (event: MapLayerMouseEvent) => {
+        const feature = event.features?.[0]
+        if (!feature || !event.lngLat) return
+        const properties = feature.properties ?? {}
+        new Popup({ closeButton: true, closeOnClick: true })
+          .setLngLat(event.lngLat)
+          .setHTML(`<div class="raw-vehicle-popup"><strong>${escapeHtml(properties.vehiclePrefix)}</strong><span>${escapeHtml(properties.operationalLabel)}</span></div>`)
+          .addTo(instance)
+      })
       instance.on('mouseenter', 'fleet-vehicle-points', () => {
         instance.getCanvas().style.cursor = 'pointer'
       })
       instance.on('mouseleave', 'fleet-vehicle-points', () => {
         instance.getCanvas().style.cursor = ''
       })
+      instance.on('mouseenter', 'fleet-vehicle-stale', () => { instance.getCanvas().style.cursor = 'pointer' })
+      instance.on('mouseleave', 'fleet-vehicle-stale', () => { instance.getCanvas().style.cursor = '' })
+      instance.on('mouseenter', 'raw-vehicle-points', () => { instance.getCanvas().style.cursor = 'pointer' })
+      instance.on('mouseleave', 'raw-vehicle-points', () => { instance.getCanvas().style.cursor = '' })
       setReady(true)
     }
-    initializeInteractions()
+    instance.on('load', () => {
+      addOperationalLayers(instance)
+      initializeInteractions()
+    })
 
     const observer = new ResizeObserver(() => instance.resize())
     observer.observe(container.current)
@@ -295,24 +423,24 @@ export function OperationsMap({
     const instance = map.current
     window.localStorage.setItem('gtfs-on-time-basemap', basemap)
 
-    if (basemap === 'dark') {
-      if (styleFamily.current === 'dark') return
-      styleFamily.current = 'dark'
+    if (basemap === 'neutral' || basemap === 'dark') {
+      if (styleFamily.current === basemap) return
+      styleFamily.current = basemap
       const restoreOperationalLayers = () => {
         addOperationalLayers(instance)
         setStyleRevision((revision) => revision + 1)
       }
       instance.once('style.load', restoreOperationalLayers)
-      instance.setStyle(OPENFREEMAP_DARK_STYLE)
+      instance.setStyle(basemap === 'dark' ? OPENFREEMAP_DARK_STYLE : OMT_NEUTRAL_STYLE)
       return () => {
         instance.off('style.load', restoreOperationalLayers)
       }
     }
 
-    if (styleFamily.current === 'dark') {
-      styleFamily.current = 'standard'
+    if (styleFamily.current !== 'satellite') {
+      styleFamily.current = 'satellite'
       const restoreStandardStyle = () => {
-        setStandardBasemap(instance, basemap)
+        setStandardBasemap(instance, 'satellite')
         setStyleRevision((revision) => revision + 1)
       }
       instance.once('style.load', restoreStandardStyle)
@@ -322,7 +450,7 @@ export function OperationsMap({
       }
     }
 
-    setStandardBasemap(instance, basemap)
+    setStandardBasemap(instance, 'satellite')
   }, [basemap, ready])
 
   useEffect(() => {
@@ -333,6 +461,11 @@ export function OperationsMap({
       fleetCollection(vehicles, operationalStatusByVehicle, alertsByVehicle),
     )
   }, [alertsByVehicle, operationalStatusByVehicle, ready, styleRevision, vehicles])
+
+  useEffect(() => {
+    if (!ready || !map.current) return
+    updateSource(map.current, 'raw-vehicles', rawFleetCollection(rawVehicles))
+  }, [rawVehicles, ready, styleRevision])
 
   useEffect(() => {
     if (!ready || !map.current) return
