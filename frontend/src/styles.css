@@ -47,9 +47,31 @@ button { color: inherit; }
 .topbar button { border: 0; background: transparent; color: white; cursor: pointer; }
 .topbar-menu, .topbar-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; }
 .topbar-menu:hover, .topbar-icon:hover { background: rgba(255, 255, 255, 0.14); }
-.brand-lockup { height: 46px; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-.brand-urbi-logo { width: 92px; height: 42px; object-fit: contain; }
-.brand-gipe-logo { width: 62px; height: 29px; object-fit: contain; filter: grayscale(1) brightness(0) invert(1); opacity: .96; }
+
+.brand-lockup {
+  position: relative;
+  width: 148px;
+  height: 46px;
+  white-space: nowrap;
+}
+
+.brand-urbi-logo {
+  width: 92px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.brand-gipe-logo {
+  position: absolute;
+  right: 0;
+  bottom: -2px;
+  width: 52px;
+  height: 24px;
+  object-fit: contain;
+  filter: grayscale(1) brightness(0) invert(1);
+  opacity: .96;
+}
+
 .topbar-context { display: flex; align-items: center; gap: 7px; font-size: 13px; opacity: 0.96; }
 .topbar-context span { opacity: 0.75; }
 .topbar-status { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; opacity: 0.92; }
